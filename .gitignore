@@ -157,6 +157,7 @@ dumpcore*out
 build.tmp.binaries/
 tasklist.json
 modules/esp_idf
+modules/pico_sdk
 
 # lua-language-server linter
 ScriptingDocs.md

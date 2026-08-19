@@ -28,7 +28,7 @@
 #define MAX_NAME_LEN 255
 #endif
 
-#if (CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS) || (CONFIG_HAL_BOARD == HAL_BOARD_ESP32)
+#if (CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS) || (CONFIG_HAL_BOARD == HAL_BOARD_ESP32) || (CONFIG_HAL_BOARD == HAL_BOARD_RP2350)
 #define DT_REG 0
 #define DT_DIR 1
 #define DT_LNK 10
@@ -41,13 +41,15 @@
 #if AP_FILESYSTEM_LITTLEFS_ENABLED
 #include "AP_Filesystem_FlashMemory_LittleFS.h"
 #endif
+#endif // HAL_BOARD_CHIBIOS
 
+// bare-metal boards have no POSIX <dirent.h> to provide this
+#if (CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS) || (CONFIG_HAL_BOARD == HAL_BOARD_RP2350)
 struct dirent {
    char    d_name[MAX_NAME_LEN]; /* filename */
    uint8_t d_type;
 };
-
-#endif // HAL_BOARD_CHIBIOS
+#endif
 
 #include <fcntl.h>
 #include <errno.h>

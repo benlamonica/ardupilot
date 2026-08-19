@@ -687,6 +687,10 @@ def add_dynamic_boards_from_hwdef_dir(base_type, hwdef_dir):
         if os.path.exists(hwdef) or os.path.exists(hwdef_bl):
             newclass = type(d, (base_type,), {'name': d})
 
+def add_dynamic_boards_rp2350():
+    '''add boards based on existence of hwdef.dat in subdirectories for RP2350'''
+    add_dynamic_boards_from_hwdef_dir(rp2350, 'libraries/AP_HAL_RP2350/hwdef')
+
 def add_dynamic_boards_esp32():
     '''add boards based on existence of hwdef.dat in subdirectories for ESP32'''
     dirname, dirlist, filenames = next(os.walk('libraries/AP_HAL_ESP32/hwdef'))
@@ -706,6 +710,7 @@ def get_boards_names():
     add_dynamic_boards_esp32()
     add_dynamic_boards_linux()
     add_dynamic_boards_qurt()
+    add_dynamic_boards_rp2350()
     add_dynamic_boards_sitl()
 
     return sorted(list(_board_classes.keys()), key=str.lower)
@@ -1130,6 +1135,78 @@ class esp32s3(esp32):
         if hasattr(self, 'hwdef'):
             cfg.env.HWDEF = self.hwdef
         super(esp32s3, self).configure_env(cfg, env)
+
+class rp2350(Board):
+    abstract = True
+    toolchain = 'arm-none-eabi'
+
+    def configure_env(self, cfg, env):
+        if hasattr(self, 'hwdef'):
+            cfg.env.HWDEF = self.hwdef
+
+        env.BOARD_CLASS = "RP2350"
+
+        super(rp2350, self).configure_env(cfg, env)
+        cfg.load('rp2350')
+
+        env.DEFINES.update(
+            CONFIG_HAL_BOARD = 'HAL_BOARD_RP2350',
+            CONFIG_HAL_BOARD_SUBTYPE = 'HAL_BOARD_SUBTYPE_NONE',
+            AP_SIM_ENABLED = 0,
+        )
+
+        env.AP_LIBRARIES += [
+            'AP_HAL_RP2350',
+        ]
+
+        # keep in sync with what the Pico-SDK CMake build uses for
+        # PICO_PLATFORM=rp2350-arm-s, as ArduPilot objects are linked
+        # directly against the SDK's
+        rp2350_arch_flags = [
+            '-mcpu=cortex-m33',
+            '-mthumb',
+            '-march=armv8-m.main+fp+dsp',
+            '-mfloat-abi=softfp',
+            '-mcmse',
+        ]
+        env.CXXFLAGS += rp2350_arch_flags + [
+            '-fsingle-precision-constant',
+            '-fno-exceptions',
+            '-fno-rtti',
+            '-fno-threadsafe-statics',
+            '-ffunction-sections',
+            '-fdata-sections',
+        ]
+        env.CFLAGS += rp2350_arch_flags + [
+            '-fsingle-precision-constant',
+            '-ffunction-sections',
+            '-fdata-sections',
+        ]
+
+        # Pico-SDK headers rely on undefined feature macros evaluating to 0
+        # (e.g. "#define PICO_INCLUDE_RTC_DATETIME PICO_RP2040"), so they are
+        # not -Wundef clean. AP_HAL_ESP32 drops this for the ESP-IDF headers
+        # for the same reason.
+        env.CFLAGS.remove('-Werror=undef')
+        env.CXXFLAGS.remove('-Werror=undef')
+
+        env.AP_PROGRAM_AS_STLIB = True
+
+    def pre_build(self, bld):
+        '''pre-build hook that gets called before dynamic sources'''
+        from waflib.Context import load_tool
+        module = load_tool('rp2350', [], with_sys_path=True)
+        fun = getattr(module, 'pre_build', None)
+        if fun:
+            fun(bld)
+        super(rp2350, self).pre_build(bld)
+
+    def build(self, bld):
+        super(rp2350, self).build(bld)
+        bld.load('rp2350')
+
+    def get_name(self):
+        return self.__class__.__name__
 
 class chibios(Board):
     abstract = True

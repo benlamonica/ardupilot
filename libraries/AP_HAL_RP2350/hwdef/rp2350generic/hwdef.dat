@@ -1,0 +1,6 @@
+# hwdef.dat for a generic RP2350 dev board (e.g. Raspberry Pi Pico 2 / Pico 2 W)
+#
+# Phase 1 bring-up target: boots and gives a USB-CDC console. No sensors or
+# other real peripherals are wired up yet (see the RP2350 port plan).
+
+define BOARD_NAME "rp2350generic"
