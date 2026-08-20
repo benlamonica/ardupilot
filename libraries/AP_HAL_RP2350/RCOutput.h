@@ -20,6 +20,8 @@
 #include <AP_HAL/AP_HAL.h>
 #include "HAL_RP2350_Namespace.h"
 
+#include <AP_HAL/utility/RingBuffer.h>
+
 #include <hardware/pio.h>
 
 #ifndef AP_HAL_RCOUTPUT_ENABLED
@@ -31,6 +33,10 @@
 // the PWM counters are run at 1MHz so that a level is a pulse width in
 // microseconds, which is the unit AP_HAL::RCOutput works in
 #define RP2350_PWM_COUNT_HZ 1000000
+
+// DShot frames go out from the 1kHz timer process, so this is how long a
+// command occupies per repeat
+#define RP2350_DSHOT_PERIOD_US 1000
 
 #ifndef RP2350_RCOUT_DEFAULT_FREQ
 #define RP2350_RCOUT_DEFAULT_FREQ 50
@@ -58,6 +64,12 @@ public:
     void push() override;
 
     void set_output_mode(uint32_t mask, enum output_mode mode) override;
+
+    void send_dshot_command(uint8_t command, uint8_t chan = ALL_CHANNELS,
+                            uint32_t command_timeout_ms = 0, uint16_t repeat_count = 10,
+                            bool priority = false) override;
+
+    uint32_t get_dshot_period_us() const override { return RP2350_DSHOT_PERIOD_US; }
 
 private:
     // move one channel from its PWM slice to a PIO state machine running the
@@ -90,6 +102,19 @@ private:
     // one entry per PWM slice; both channels of a slice share the counter,
     // so they cannot be given different frequencies
     uint16_t _slice_freq_hz[12];
+
+    /*
+      A DShot command occupies the throttle field, so it displaces the
+      throttle for as many frames as `cycles` says. Commands are queued
+      because callers send them in sequences, such as a run of beeps.
+    */
+    struct DshotCommandPacket {
+        uint8_t command;
+        uint8_t chan;      // an output channel, or ALL_CHANNELS
+        uint32_t cycles;
+    };
+    ObjectBuffer<DshotCommandPacket> _dshot_command_queue{8};
+    DshotCommandPacket _dshot_command;
 
     // channels moved from PWM to DShot
     uint32_t _dshot_mask;

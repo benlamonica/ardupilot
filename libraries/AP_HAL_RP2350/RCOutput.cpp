@@ -139,7 +139,6 @@ bool RCOutput::dshot_configure(uint8_t chan, uint32_t bitrate)
           line held low rather than running the frame back to back.
         */
         sm_config_set_out_shift(&c, false, true, 16);
-        sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
         // the program spends T1+T2+T3 = 8 cycles on each bit
         sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (bitrate * 8));
 
@@ -170,11 +169,53 @@ uint16_t RCOutput::dshot_packet(uint16_t value, bool telem_request)
     return (packet << 4) | (csum & 0xf);
 }
 
+/*
+  Queue a DShot command. Values 0-47 of the throttle field are commands rather
+  than throttle, so a command displaces the throttle for the frames it takes.
+*/
+void RCOutput::send_dshot_command(uint8_t command, uint8_t chan, uint32_t command_timeout_ms,
+                                  uint16_t repeat_count, bool priority)
+{
+    if (_dshot_mask == 0) {
+        return;
+    }
+    /*
+      Once armed only priority commands are accepted, so that something like a
+      beep request cannot interrupt the throttle stream in flight.
+    */
+    if (hal.util->get_soft_armed() && !priority) {
+        return;
+    }
+
+    DshotCommandPacket pkt {};
+    pkt.command = command;
+    pkt.chan = chan;
+    // an ESC only acts on a command after seeing it repeatedly
+    if (command_timeout_ms == 0) {
+        pkt.cycles = MAX(10U, uint32_t(repeat_count));
+    } else {
+        pkt.cycles = MAX(command_timeout_ms * 1000U / RP2350_DSHOT_PERIOD_US,
+                         uint32_t(repeat_count));
+    }
+
+    if (!_dshot_command_queue.push(pkt) && priority) {
+        // the queue is full, but a priority command displaces an older one
+        _dshot_command_queue.push_force(pkt);
+    }
+}
+
 void RCOutput::dshot_send()
 {
     if (_dshot_mask == 0) {
         return;
     }
+
+    if (_dshot_command.cycles == 0) {
+        // finished with the last command, so take the next one if there is one
+        IGNORE_RETURN(_dshot_command_queue.pop(_dshot_command));
+    }
+    const bool command_active = _dshot_command.cycles > 0;
+
     const bool armed = hal.util->get_soft_armed();
 
     for (uint8_t i = 0; i < num_channels(); i++) {
@@ -183,23 +224,42 @@ void RCOutput::dshot_send()
         }
 
         uint16_t value = 0;
-        const uint16_t pwm = _period_us[i];
-        if (armed && pwm != 0 && (_enabled_mask & (1U << i)) != 0) {
-            // the same mapping the other HALs use: 1000-2000us becomes the
-            // 48-2047 throttle range, with zero reserved for "stopped"
-            const uint16_t p = constrain_int16(pwm, 1000, 2000);
-            value = MIN(2 * (p - 1000), 1999);
-            if (value != 0) {
-                value += DSHOT_ZERO_THROTTLE;
+        bool telem_request = false;
+
+        if (command_active &&
+            (_dshot_command.chan == ALL_CHANNELS || _dshot_command.chan == i)) {
+            /*
+              An ESC only treats the field as a command when the telemetry
+              request bit is set; without it these low values would be read as
+              throttle. Channels the command is not aimed at fall through and
+              get a zero throttle frame rather than nothing, so that their ESCs
+              stay armed while the command runs.
+            */
+            value = _dshot_command.command;
+            telem_request = true;
+        } else if (!command_active && armed && (_enabled_mask & (1U << i)) != 0) {
+            const uint16_t pwm = _period_us[i];
+            if (pwm != 0) {
+                // the same mapping the other HALs use: 1000-2000us becomes the
+                // 48-2047 throttle range, with zero reserved for "stopped"
+                const uint16_t p = constrain_int16(pwm, 1000, 2000);
+                value = MIN(2 * (p - 1000), 1999);
+                if (value != 0) {
+                    value += DSHOT_ZERO_THROTTLE;
+                }
             }
         }
 
-        const uint32_t frame = dshot_packet(value, false);
+        const uint32_t frame = dshot_packet(value, telem_request);
         if (!pio_sm_is_tx_fifo_full(_dshot[i].pio, _dshot[i].sm)) {
             // left justified, because the state machine shifts out of the top
             // of the output shift register
             pio_sm_put(_dshot[i].pio, _dshot[i].sm, frame << 16);
         }
+    }
+
+    if (command_active) {
+        _dshot_command.cycles--;
     }
 }
 

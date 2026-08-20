@@ -146,9 +146,23 @@ Verified with a Saleae DShot decoder at DShot600 and DShot300 simultaneously:
 throttle values and checksums decoded as sent, with CRC passing on every channel, and
 plain PWM channels continued to run undisturbed on their slices alongside.
 
+`send_dshot_command()` is implemented. Values 0-47 of the throttle field are commands
+rather than throttle, and an ESC only reads them as commands when the telemetry
+request bit is set, so a command frame differs from a throttle frame in more than its
+value. Commands are queued, because callers send them in runs such as a sequence of
+beeps, and each is repeated for a number of frames because an ESC only acts on a
+command it sees several times. While a command is running, channels it is not aimed at
+are sent a zero throttle frame rather than nothing, so their ESCs stay armed. Once
+armed, only commands flagged `priority` are accepted, so a beep request cannot
+interrupt the throttle stream in flight.
+
+Frames are sent from the 1kHz timer process, so `get_dshot_period_us()` reports 1000
+and `set_dshot_period()` is not honoured; tying the rate to the vehicle loop would
+mean replacing that timer process.
+
 Not yet implemented: bidirectional DShot (eRPM telemetry), which needs the line
-reversed and a GCR decode after each frame, and the DShot command set
-(`send_dshot_command()`) for beeps, direction and save.
+reversed and a GCR decode after each frame. The TX FIFO is deliberately left unjoined
+so the RX FIFO stays available for that.
 
 ## Threading
 
