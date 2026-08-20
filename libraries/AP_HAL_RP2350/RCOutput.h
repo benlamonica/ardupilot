@@ -20,6 +20,8 @@
 #include <AP_HAL/AP_HAL.h>
 #include "HAL_RP2350_Namespace.h"
 
+#include <hardware/pio.h>
+
 #ifndef AP_HAL_RCOUTPUT_ENABLED
 #define AP_HAL_RCOUTPUT_ENABLED defined(HAL_RP2350_RCOUT_CHANNELS)
 #endif
@@ -55,7 +57,20 @@ public:
     void cork() override;
     void push() override;
 
+    void set_output_mode(uint32_t mask, enum output_mode mode) override;
+
 private:
+    // move one channel from its PWM slice to a PIO state machine running the
+    // DShot program at the given wire bit rate
+    bool dshot_configure(uint8_t chan, uint32_t bitrate);
+
+    // build a DShot frame: 11 bit value, telemetry request, 4 bit checksum
+    static uint16_t dshot_packet(uint16_t value, bool telem_request);
+
+    // push a frame to every DShot channel; runs from the timer thread, as
+    // ESCs disarm if frames stop arriving
+    void dshot_send();
+
     // push one channel's pulse width to the hardware
     void apply(uint8_t chan);
 
@@ -75,6 +90,17 @@ private:
     // one entry per PWM slice; both channels of a slice share the counter,
     // so they cannot be given different frequencies
     uint16_t _slice_freq_hz[12];
+
+    // channels moved from PWM to DShot
+    uint32_t _dshot_mask;
+    struct {
+        PIO pio;
+        uint8_t sm;
+    } _dshot[16];
+
+    // where the DShot program sits in each PIO block's instruction memory,
+    // or -1 if it has not been loaded into that block yet
+    int8_t _pio_offset[NUM_PIOS];
 };
 
 }

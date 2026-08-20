@@ -1,0 +1,53 @@
+;
+; This file is free software: you can redistribute it and/or modify it
+; under the terms of the GNU General Public License as published by the
+; Free Software Foundation, either version 3 of the License, or
+; (at your option) any later version.
+;
+; This file is distributed in the hope that it will be useful, but
+; WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+; See the GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License along
+; with this program.  If not, see <http://www.gnu.org/licenses/>.
+;
+; Code by Ben La Monica
+;
+; DShot bit encoding.
+;
+; dshot.pio.h is generated from this file and checked in beside it, because
+; ArduPilot's own sources are built by waf rather than by the Pico-SDK's CMake
+; and so cannot depend on a header generated during the CMake build. To
+; regenerate it after editing this file:
+;
+;   modules/pico_sdk/tools/pioasm/pioasm dshot.pio dshot.pio.h
+;
+; (build pioasm first with cmake -S modules/pico_sdk/tools/pioasm -B <dir>
+;  -DPIOASM_VERSION_STRING=2.3.0)
+;
+
+.program dshot
+.side_set 1
+
+; Every DShot bit begins high. A '0' returns low 37.5% of the way through the
+; bit period and a '1' at 75%. Splitting each bit into T1 + T2 + T3 cycles
+; leaves a '0' high for T1 and a '1' high for T1 + T2, so T1 = 3, T2 = 3,
+; T3 = 2 places those edges at exactly 3/8 and 6/8 of the bit. The state
+; machine therefore runs at 8x the wire bit rate.
+.define public T1 3
+.define public T2 3
+.define public T3 2
+
+.wrap_target
+bitloop:
+    ; Tail of the previous bit. With autopull set to 16 bits the state machine
+    ; stalls on this instruction between frames, and a stalled instruction
+    ; still drives its side-set, so the line rests low as DShot requires.
+    out x, 1       side 0 [T3 - 1]
+    jmp !x do_zero side 1 [T1 - 1] ; every bit starts high
+do_one:
+    jmp  bitloop   side 1 [T2 - 1] ; a '1' stays high through 75%
+do_zero:
+    nop            side 0 [T2 - 1] ; a '0' has already gone low
+.wrap

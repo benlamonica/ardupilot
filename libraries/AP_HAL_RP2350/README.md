@@ -122,6 +122,34 @@ Verified with a logic analyzer on GP6-GP13, driving eight distinct widths across
 1000-2000us range at a mix of 50Hz and 400Hz: measured widths and periods matched the
 requested values, and each slice pair shared a period as expected.
 
+### DShot
+
+DShot is a serial protocol rather than a pulse width - each frame is 16 bits and every
+bit is itself a short pulse - so it cannot come from a PWM slice. `set_output_mode()`
+instead moves a channel to a PIO state machine running `dshot.pio`, which generates
+the bit encoding in hardware. Two useful consequences: any GPIO can carry DShot, since
+PIO is not tied to particular pins the way a DMA-capable timer is on STM32; and the
+paired-slice frequency restriction above stops applying to a channel once it moves.
+
+Each bit is split into T1 + T2 + T3 = 8 state machine cycles, leaving a '0' high for
+3/8 of the bit and a '1' for 6/8, so the state machine simply runs at eight times the
+wire bit rate. Because the state machine does the encoding, the CPU only writes one
+word per motor per frame, and no DMA is needed. Frames are sent from a timer process
+rather than from `push()`, as ESCs disarm if frames stop arriving.
+
+`dshot.pio.h` is generated from `dshot.pio` and checked in beside it, because
+ArduPilot's sources are built by waf and cannot depend on a header generated during
+the Pico-SDK CMake build. The regeneration command is in the comments at the top of
+`dshot.pio`.
+
+Verified with a Saleae DShot decoder at DShot600 and DShot300 simultaneously:
+throttle values and checksums decoded as sent, with CRC passing on every channel, and
+plain PWM channels continued to run undisturbed on their slices alongside.
+
+Not yet implemented: bidirectional DShot (eRPM telemetry), which needs the line
+reversed and a GCR decode after each frame, and the DShot command set
+(`send_dshot_command()`) for beeps, direction and save.
+
 ## Threading
 
 FreeRTOS runs in SMP mode across both cores. Threads created by the HAL are pinned:
