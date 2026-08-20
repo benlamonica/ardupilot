@@ -186,7 +186,8 @@ bool AP_FlashStorage::write(uint16_t offset, uint16_t length)
     
     while (length > 0) {
         uint8_t n = max_write;
-#if AP_FLASHSTORAGE_TYPE != AP_FLASHSTORAGE_TYPE_H7 && AP_FLASHSTORAGE_TYPE != AP_FLASHSTORAGE_TYPE_G4
+#if AP_FLASHSTORAGE_TYPE != AP_FLASHSTORAGE_TYPE_H7 && AP_FLASHSTORAGE_TYPE != AP_FLASHSTORAGE_TYPE_G4 && \
+    AP_FLASHSTORAGE_TYPE != AP_FLASHSTORAGE_TYPE_RP2350
         if (length < n) {
             n = length;
         }
@@ -235,7 +236,8 @@ bool AP_FlashStorage::write(uint16_t offset, uint16_t length)
         if (!flash_write(current_sector, write_offset, (uint8_t*)&blk, sizeof(blk.header) + block_nbytes)) {
             return false;
         }
-#elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_H7 || AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_G4
+#elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_H7 || AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_G4 || \
+      AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_RP2350
         blk.header.state = BLOCK_STATE_VALID;
         if (!flash_write(current_sector, write_offset, (uint8_t*)&blk, sizeof(blk.header) + max_write)) {
             return false;
@@ -319,6 +321,9 @@ bool AP_FlashStorage::load_sector(uint8_t sector)
 #elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_G4
         // offsets must be advanced to a multiple of 8 on G4
         ofs = (ofs + 7U) & ~7U;
+#elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_RP2350
+        // offsets must be advanced to a whole page on RP2350
+        ofs = (ofs + 255U) & ~255U;
 #endif
     }
     write_offset = ofs;
@@ -541,9 +546,11 @@ void AP_FlashStorage::sector_header::set_state(SectorState state)
     }
 }
 
-#elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_G4
+#elif AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_G4 || AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_RP2350
 /*
-  G4 specific sector header functions
+  G4 and RP2350 sector header functions. Both encode the three states the
+  same way; they differ only in that the RP2350 header is padded out to a
+  whole flash page.
  */
 bool AP_FlashStorage::sector_header::signature_ok(void) const
 {
@@ -581,6 +588,11 @@ AP_FlashStorage::SectorState AP_FlashStorage::sector_header::get_state(void) con
 
 void AP_FlashStorage::sector_header::set_state(SectorState state)
 {
+#if AP_FLASHSTORAGE_TYPE == AP_FLASHSTORAGE_TYPE_RP2350
+    // the header is written as one whole flash page, so the padding has
+    // to be left erased rather than holding stack garbage
+    memset(pad, 0xff, sizeof(pad));
+#endif
     switch (state) {
     case SECTOR_STATE_AVAILABLE:
         signature1 = signature;

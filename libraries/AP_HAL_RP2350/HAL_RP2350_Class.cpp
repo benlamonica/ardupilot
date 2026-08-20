@@ -8,6 +8,7 @@
 #include "Scheduler.h"
 #include "GPIO.h"
 #include "UARTDriver.h"
+#include "Storage.h"
 #include "Util.h"
 
 // Bring-up: only the serial ports, GPIO and Scheduler are real. Every other
@@ -35,7 +36,7 @@ static Empty::UARTDriver serial9Driver;
 static Empty::I2CDeviceManager i2cDeviceManager;
 static Empty::SPIDeviceManager spiDeviceManager;
 static Empty::AnalogIn analogIn;
-static Empty::Storage storageDriver;
+static RP2350::Storage storageDriver;
 static RP2350::GPIO gpioDriver;
 static Empty::RCInput rcinDriver;
 static Empty::RCOutput rcoutDriver;

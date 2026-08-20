@@ -186,7 +186,7 @@ void FlashTest::loop(void)
         AP_HAL::panic("FATAL: data mis-match");
     }
     while (true) {
-        hal.console->printf("TEST PASSED");
+        hal.console->printf("TEST PASSED\n");
         hal.scheduler->delay(20000);
     }
 }

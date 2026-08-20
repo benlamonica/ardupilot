@@ -34,6 +34,8 @@ void Scheduler::init()
                   &_uart_task_handle, CORE_FAST);
     create_pinned(_io_thread, "APM_IO", IO_SS, this, IO_PRIO,
                   &_io_task_handle, CORE_SLOW);
+    create_pinned(_storage_thread, "APM_STORAGE", STORAGE_SS, this, STORAGE_PRIO,
+                  &_storage_task_handle, CORE_SLOW);
 }
 
 void Scheduler::delay(uint16_t ms)
@@ -285,5 +287,21 @@ void Scheduler::_io_thread(void *arg)
     for (;;) {
         vTaskDelay(1);
         sched->_run_io();
+    }
+}
+
+/*
+  Storage writes get their own thread because a flash program stops both
+  cores while it runs; keeping it off the IO thread means IO procs are not
+  delayed by a parameter save.
+*/
+void Scheduler::_storage_thread(void *arg)
+{
+    while (!_initialized) {
+        vTaskDelay(1);
+    }
+    for (;;) {
+        vTaskDelay(1);
+        hal.storage->_timer_tick();
     }
 }

@@ -16,7 +16,15 @@
 #define HAL_HAVE_SERVO_VOLTAGE 0
 #define HAL_WITH_IO_MCU 0
 
-#define HAL_STORAGE_SIZE (16384)
+/*
+  65 AP_FlashStorage blocks of 254 bytes. This has to be a whole number of
+  blocks: load_sector() rejects a block that would reach past the end of
+  storage, so a partial trailing block can be written but never read back.
+  254 is the block size this board uses (a 256 byte flash page less the two
+  byte header), and 65 of them is the smallest multiple that still clears the
+  16384 threshold for StorageManager's 15 area layout.
+ */
+#define HAL_STORAGE_SIZE (65*254)
 
 #ifndef HAL_PROGRAM_SIZE_LIMIT_KB
 #define HAL_PROGRAM_SIZE_LIMIT_KB 2048

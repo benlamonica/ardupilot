@@ -78,11 +78,13 @@ private:
     TaskHandle_t _timer_task_handle;
     TaskHandle_t _uart_task_handle;
     TaskHandle_t _io_task_handle;
+    TaskHandle_t _storage_task_handle;
 
     static void _main_thread(void *arg);
     static void _timer_thread(void *arg);
     static void _uart_thread(void *arg);
     static void _io_thread(void *arg);
+    static void _storage_thread(void *arg);
 
     static void thread_create_trampoline(void *ctx);
 

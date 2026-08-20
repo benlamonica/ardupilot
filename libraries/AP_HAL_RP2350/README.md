@@ -6,9 +6,9 @@ this directory adapts them to the `AP_HAL` interfaces.
 
 **Status: early bring-up.** The build produces a complete firmware image, and runs
 under FreeRTOS on both Cortex-M33 cores, but only the Scheduler, Semaphores, GPIO,
-serial ports and Util are implemented. Every other peripheral is wired to an
-`AP_HAL_Empty` stub, so there are no sensors, no motor output and no parameter
-storage yet. It has not been flight tested, and it is not airworthy.
+serial ports, parameter storage and Util are implemented. Every other peripheral is
+wired to an `AP_HAL_Empty` stub, so there are no sensors and no motor output yet. It
+has not been flight tested, and it is not airworthy.
 
 ## Serial ports
 
@@ -33,11 +33,45 @@ consumers. The cost is that a *sustained* stream is capped at one FIFO per tick,
 around 320 kbaud; bursts go out at full line rate. DMA would lift that if a port
 ever needs it.
 
+## Parameter storage
+
+Parameters live in two 64k erase blocks at the very top of the QSPI flash, above
+the firmware, driven by the shared `AP_FlashStorage` log. A UF2 or picotool load
+only rewrites the sectors the image itself covers, so parameters survive a firmware
+update; `_flash_load()` panics if a growing image ever reaches the storage region.
+
+Two things are specific to this chip. The bootrom routine behind
+`flash_range_program()` only takes whole 256 byte pages, so `AP_FlashStorage` uses a
+256 byte block layout here (`AP_FLASHSTORAGE_TYPE_RP2350`, alongside the existing H7
+and G4 chunk-write types). That makes `HAL_STORAGE_SIZE` 65*254 rather than a round
+16384: it has to be a whole number of blocks, because `load_sector()` rejects a block
+reaching past the end of storage, so a partial trailing block can be written but
+never read back.
+
+Erasing or programming stops *both* cores, since the other one would otherwise fault
+fetching from XIP, so every access goes through `pico_flash`'s `flash_safe_execute()`.
+Erases are gated on being disarmed. The cost of the coarse blocks is that the log
+fills after about 190 line writes and then needs a sector switch and a block erase;
+raising `STORAGE_SECTOR_SIZE` trades flash space for fewer erases.
+
+`AP_FlashStorage` can be exercised on the host with this layout, which is worth doing
+for anything touching the storage arithmetic - it covers the whole buffer, where the
+on-target `StorageTest` only reaches the areas StorageManager declares:
+
+```sh
+# set AP_FLASHSTORAGE_TYPE to AP_FLASHSTORAGE_TYPE_RP2350 in
+# libraries/AP_HAL/board/sitl.h first
+./waf configure --board sitl && ./waf --targets examples/FlashTest
+SITL_PANIC_EXIT=1 ./build/sitl/examples/FlashTest   # prints TEST PASSED, then idles
+```
+
 ## Threading
 
 FreeRTOS runs in SMP mode across both cores. Threads created by the HAL are pinned:
-the main loop, timers and UARTs on core 0, and IO on core 1. Threads created through
-`hal.scheduler->thread_create()` are left unpinned for the scheduler to place.
+the main loop, timers and UARTs on core 0, and IO and storage on core 1. Threads
+created through `hal.scheduler->thread_create()` are left unpinned for the scheduler
+to place. Storage has its own thread because a flash program stops both cores, so
+running it on the IO thread would delay IO procs behind every parameter save.
 
 The kernel comes from Raspberry Pi's FreeRTOS-Kernel fork rather than upstream, as
 the RP2350 ports are only in that fork.
@@ -73,6 +107,7 @@ much faster than a full vehicle and isolate one subsystem:
 ./waf --targets examples/Printf      # console
 ./waf --targets examples/BinarySem   # threads and semaphores
 ./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
+./waf --targets examples/StorageTest # parameter storage
 ```
 
 The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.

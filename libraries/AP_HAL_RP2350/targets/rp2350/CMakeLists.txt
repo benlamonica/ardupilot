@@ -82,6 +82,7 @@ target_link_libraries(${elf_file}
                 pico_stdio_usb
                 pico_unique_id
                 pico_multicore
+                pico_flash
                 hardware_adc
                 hardware_dma
                 hardware_flash

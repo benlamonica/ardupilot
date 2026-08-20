@@ -108,6 +108,9 @@ extern void rp2350_freertos_assert(const char *file, int line);
 #define INCLUDE_vTaskDelayUntil                 1
 #define INCLUDE_vTaskSuspend                    1
 #define INCLUDE_vTaskDelete                     1
+// required by pico_flash: flash_safe_execute() raises the priority of the
+// lockout task it starts on the other core
+#define INCLUDE_vTaskPrioritySet                1
 #define INCLUDE_xTaskGetCurrentTaskHandle       1
 #define INCLUDE_xTaskGetSchedulerState          1
 #define INCLUDE_uxTaskGetStackHighWaterMark     1
