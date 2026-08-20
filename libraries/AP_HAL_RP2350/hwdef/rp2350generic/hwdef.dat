@@ -12,3 +12,15 @@ define BOARD_NAME "rp2350generic"
 # 40-pin header.
 RP2350_SERIAL uart0 1 0
 RP2350_SERIAL uart1 5 4
+
+# RP2350_ADC_PIN <ADC input> <divider ratio> <ArduPilot pin number>
+#
+# Inputs 0-2 are GP26-GP28 on the 40 pin header. Input 3 is GP29, which is not
+# declared here: on the Pico 2 W that pin is used by the wireless chip. The
+# ratio is 1.0 because these are wired straight to the header with no divider;
+# a board that scales a battery voltage down would put the divider ratio here.
+# The ArduPilot pin numbers are the GPIO numbers, so that a parameter naming a
+# pin matches the silkscreen.
+RP2350_ADC_PIN 0 1.0 26
+RP2350_ADC_PIN 1 1.0 27
+RP2350_ADC_PIN 2 1.0 28

@@ -6,9 +6,9 @@ this directory adapts them to the `AP_HAL` interfaces.
 
 **Status: early bring-up.** The build produces a complete firmware image, and runs
 under FreeRTOS on both Cortex-M33 cores, but only the Scheduler, Semaphores, GPIO,
-serial ports, parameter storage and Util are implemented. Every other peripheral is
-wired to an `AP_HAL_Empty` stub, so there are no sensors and no motor output yet. It
-has not been flight tested, and it is not airworthy.
+serial ports, parameter storage, analog inputs and Util are implemented. Every
+other peripheral is wired to an `AP_HAL_Empty` stub, so there are no sensors and no
+motor output yet. It has not been flight tested, and it is not airworthy.
 
 ## Serial ports
 
@@ -69,6 +69,29 @@ failure is still visible, because panics go through stdio, but a pass is not.
 ./waf --targets examples/FlashTest   # prints TEST PASSED on the console
 ```
 
+## Analog inputs
+
+The 12 bit ADC is declared per board in `hwdef.dat`:
+
+```
+# RP2350_ADC_PIN <ADC input> <divider ratio> <ArduPilot pin number>
+RP2350_ADC_PIN 0 1.0 26
+```
+
+The ArduPilot pin number is what a parameter such as `BATT_VOLT_PIN` refers to;
+the generic board uses the GPIO number so that it matches the silkscreen. The
+divider ratio is the external scaling, so a battery sense divider goes here rather
+than in the driver.
+
+Readings are averaged by a timer process registered in `AnalogIn::init()`, which is
+the only reader of the ADC: keeping the hardware to one thread is what makes
+selecting an input and reading it safe without locking. `board_voltage()` returns the
+analog reference rather than a 5V rail, because that is what the ADC measures against
+and what a ratiometric sensor on this board would be powered from.
+
+Measured against the Pico's own rails, an input tied to 3V3 reads 3.297V and one tied
+to AGND reads 0.001V.
+
 ## Threading
 
 FreeRTOS runs in SMP mode across both cores. Threads created by the HAL are pinned:
@@ -112,6 +135,7 @@ much faster than a full vehicle and isolate one subsystem:
 ./waf --targets examples/BinarySem   # threads and semaphores
 ./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
 ./waf --targets examples/StorageTest # parameter storage
+./waf --targets examples/AnalogIn    # ADC, with a jumper to 3V3 or AGND
 ```
 
 The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.

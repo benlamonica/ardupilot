@@ -1,3 +1,20 @@
+/*
+ * This file is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This file is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Code by Ben La Monica
+ */
+
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL_Empty/AP_HAL_Empty_Private.h>
 
@@ -8,6 +25,7 @@
 #include "Scheduler.h"
 #include "GPIO.h"
 #include "UARTDriver.h"
+#include "AnalogIn.h"
 #include "Storage.h"
 #include "Util.h"
 
@@ -35,7 +53,11 @@ static Empty::UARTDriver serial9Driver;
 
 static Empty::I2CDeviceManager i2cDeviceManager;
 static Empty::SPIDeviceManager spiDeviceManager;
+#if AP_HAL_ANALOGIN_ENABLED
+static RP2350::AnalogIn analogIn;
+#else
 static Empty::AnalogIn analogIn;
+#endif
 static RP2350::Storage storageDriver;
 static RP2350::GPIO gpioDriver;
 static Empty::RCInput rcinDriver;
