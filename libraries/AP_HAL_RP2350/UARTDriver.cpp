@@ -43,6 +43,7 @@ void UARTDriver::drain_writebuf()
     if (!_initialized) {
         return;
     }
+    WITH_SEMAPHORE(_write_sem);
     while (_writebuf.available() > 0) {
         uint32_t avail = tud_cdc_write_available();
         if (avail == 0) {
@@ -115,7 +116,13 @@ size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
     if (!_initialized) {
         return 0;
     }
-    size_t ret = _writebuf.write(buffer, size);
+    size_t ret;
+    {
+        // keep each write contiguous in the buffer, so concurrent writers on
+        // either core cannot interleave within a line
+        WITH_SEMAPHORE(_write_sem);
+        ret = _writebuf.write(buffer, size);
+    }
     drain_writebuf();
     return ret;
 }

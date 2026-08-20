@@ -44,6 +44,18 @@ def configure(cfg):
     print("USING PICO SDK:" + str(env.PICO_SDK_PATH))
 
     try:
+        env.FREERTOS_KERNEL_PATH = os.environ['FREERTOS_KERNEL_PATH']
+    except KeyError:
+        env.FREERTOS_KERNEL_PATH = srcpath('modules/freertos_kernel')
+    rp2350_port = os.path.join(env.FREERTOS_KERNEL_PATH,
+                               'portable/ThirdParty/GCC/RP2350_ARM_NTZ')
+    if not os.path.exists(rp2350_port):
+        cfg.fatal("FreeRTOS RP2350 port not found at %s - run "
+                  "Tools/scripts/rp2350_get_freertos.sh or set FREERTOS_KERNEL_PATH"
+                  % rp2350_port)
+    print("USING FREERTOS KERNEL:" + str(env.FREERTOS_KERNEL_PATH))
+
+    try:
         hwdef_obj = generate_hwdef_h(env)
     except Exception:
         traceback.print_exc()
@@ -82,6 +94,7 @@ def pre_build(self):
         'PICO_BOARD': self.env.PICO_BOARD or 'pico2',
         'PICO_PLATFORM': 'rp2350-arm-s',
         'PICO_SDK_PATH': self.env.PICO_SDK_PATH,
+        'FREERTOS_KERNEL_PATH': self.env.FREERTOS_KERNEL_PATH,
     }
     pico_sdk = self.cmake(
             name='pico-sdk',

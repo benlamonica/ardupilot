@@ -28,6 +28,11 @@ target_compile_options(pico_cxx_options INTERFACE
 
 pico_sdk_init()
 
+# FreeRTOS SMP kernel; FREERTOS_KERNEL_PATH is passed in by rp2350.py.
+# FREERTOS_CONFIG_FILE_DIRECTORY tells the port where FreeRTOSConfig.h lives.
+set(FREERTOS_CONFIG_FILE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+add_subdirectory(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2350_ARM_NTZ FreeRTOS-Kernel)
+
 # the Pico-SDK appends the .elf suffix itself, giving ardupilot.elf
 set(elf_file ardupilot)
 
@@ -71,9 +76,12 @@ elseif(${ARDUPILOT_CMD} STREQUAL "rover")
 endif()
 
 target_link_libraries(${elf_file}
+                FreeRTOS-Kernel
+                FreeRTOS-Kernel-Heap3
                 pico_stdlib
                 pico_stdio_usb
                 pico_unique_id
+                pico_multicore
                 hardware_adc
                 hardware_dma
                 hardware_flash
@@ -84,7 +92,14 @@ target_link_libraries(${elf_file}
                 hardware_watchdog
                 )
 
-target_link_options(${elf_file} PRIVATE "-Wl,--wrap=malloc")
+# AP_HAL_RP2350/malloc.cpp supplies these; see the comment above about
+# pico_malloc. All four are wrapped so the whole allocator is locked.
+target_link_options(${elf_file} PRIVATE
+    "-Wl,--wrap=malloc"
+    "-Wl,--wrap=calloc"
+    "-Wl,--wrap=realloc"
+    "-Wl,--wrap=free"
+)
 
 pico_add_extra_outputs(${elf_file})
 

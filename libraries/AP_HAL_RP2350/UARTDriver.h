@@ -3,6 +3,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/utility/RingBuffer.h>
 #include "HAL_RP2350_Namespace.h"
+#include "Semaphores.h"
 
 /*
   Phase 1 console driver: routes hal.console through Pico-SDK's USB CDC
@@ -36,6 +37,11 @@ private:
     // writes are queued here and drained as the host consumes them rather
     // than being dropped when the CDC FIFO is full.
     ByteBuffer _writebuf{0};
+
+    // ByteBuffer is only safe for a single producer and a single consumer.
+    // Threads on both cores write to the console, and the draining side runs
+    // from both _write() and the UART thread, so both ends are serialised.
+    Semaphore _write_sem;
 
     bool _initialized = false;
 };

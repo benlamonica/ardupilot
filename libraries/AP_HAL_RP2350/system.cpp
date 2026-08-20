@@ -4,6 +4,9 @@
 
 #include <hardware/timer.h>
 
+#include <FreeRTOS.h>
+#include <task.h>
+
 #include <stdint.h>
 #include <stdio.h>
 
@@ -45,6 +48,24 @@ uint64_t millis64()
 }
 
 } // namespace AP_HAL
+
+/*
+  target of configASSERT() - see targets/rp2350/FreeRTOSConfig.h
+*/
+extern "C" void rp2350_freertos_assert(const char *file, int line)
+{
+    AP_HAL::panic("FreeRTOS assert %s:%d", file, line);
+}
+
+/*
+  configCHECK_FOR_STACK_OVERFLOW. A thread that has run off its stack has
+  already corrupted memory, so there is nothing safe to continue with.
+*/
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t task, char *name)
+{
+    (void)task;
+    AP_HAL::panic("stack overflow in %s", name);
+}
 
 static HAL_RP2350 hal_rp2350;
 

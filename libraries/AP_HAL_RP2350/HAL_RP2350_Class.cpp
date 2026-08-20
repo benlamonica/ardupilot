@@ -1,6 +1,9 @@
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL_Empty/AP_HAL_Empty_Private.h>
 
+#include <FreeRTOS.h>
+#include <task.h>
+
 #include "HAL_RP2350_Class.h"
 #include "Scheduler.h"
 #include "GPIO.h"
@@ -64,16 +67,14 @@ HAL_RP2350::HAL_RP2350() :
 
 void HAL_RP2350::run(int argc, char* const argv[], Callbacks* callbacks) const
 {
+    schedulerInstance.set_callbacks(callbacks);
+
+    // creates the APM threads; the main thread runs callbacks->setup() and
+    // then loops callbacks->loop()
     scheduler->init();
-    cons.begin(115200);
 
-    callbacks->setup();
-    scheduler->set_system_initialized();
+    // hands both cores to FreeRTOS and does not return
+    vTaskStartScheduler();
 
-    for (;;) {
-        callbacks->loop();
-        // until Phase 2 gives the scheduler a real UART thread, the main
-        // loop is the only thing able to drain queued console output
-        cons._timer_tick();
-    }
+    AP_HAL::panic("FreeRTOS scheduler exited");
 }

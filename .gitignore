@@ -158,6 +158,7 @@ build.tmp.binaries/
 tasklist.json
 modules/esp_idf
 modules/pico_sdk
+modules/freertos_kernel
 
 # lua-language-server linter
 ScriptingDocs.md
