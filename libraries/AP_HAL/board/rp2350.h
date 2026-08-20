@@ -11,6 +11,15 @@
 #define HAL_NUM_CAN_IFACES 0
 #define HAL_MAX_CAN_PROTOCOL_DRIVERS 0
 
+/*
+  Bidirectional DShot is available on every output, because the PIO state
+  machine that drives one can reverse the line itself; it is not restricted to
+  particular pins the way a DMA capable timer channel is. eRPM from it is the
+  only source of ESC telemetry this board has.
+ */
+#define HAL_WITH_BIDIR_DSHOT
+#define HAL_WITH_ESC_TELEM 1
+
 #define HAL_HAVE_SAFETY_SWITCH 0
 #define HAL_HAVE_BOARD_VOLTAGE 0
 #define HAL_HAVE_SERVO_VOLTAGE 0

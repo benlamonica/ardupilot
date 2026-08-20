@@ -160,9 +160,60 @@ Frames are sent from the 1kHz timer process, so `get_dshot_period_us()` reports 
 and `set_dshot_period()` is not honoured; tying the rate to the vehicle loop would
 mean replacing that timer process.
 
-Not yet implemented: bidirectional DShot (eRPM telemetry), which needs the line
-reversed and a GCR decode after each frame. The TX FIFO is deliberately left unjoined
-so the RX FIFO stays available for that.
+### Bidirectional DShot
+
+Bidirectional DShot turns each output into a half duplex link: the frame is sent
+inverted, the flight controller then stops driving the line, and the ESC answers with
+its commutation period. `set_bidir_dshot_mask()` moves the channels named by
+`SERVO_BLH_BDMASK` onto a second PIO program, `bdshot`, which sends the frame and
+samples the answer without the CPU seeing an edge. Because PIO can turn a pin around
+itself, any output can do this - there is no equivalent of the STM32 restriction to
+particular timer channels.
+
+The bit rates are what shapes that program. The response runs at 5/4 of the frame bit
+rate, and one state machine has to clock both, so the frame bit is 40 cycles rather
+than the 8 the unidirectional program uses: 40 is the smallest number that both
+divides into eighths, for the 37.5%/75% bit encoding, and leaves the response bit a
+whole number of cycles at 32. Sampling starts half a bit after the ESC pulls the line
+down and then free runs, which the GCR encoding permits because it never leaves the
+line without a transition for long.
+
+Nothing in the program bounds its wait for a response, because a counter long enough
+for a silent ESC will not fit in a `set` instruction. Instead the driver looks for an
+answer one frame period after the frame went out, and puts a state machine still
+waiting at that point back to the top of its program, so a missing or unpowered ESC
+costs an error count rather than stopping the output.
+
+What comes back is a 12 bit commutation period rather than a speed: a 9 bit mantissa
+shifted up by a 3 bit exponent, in microseconds. `AP_ESC_Telem` wants motor RPM, so
+`SERVO_BLH_POLES` divides it down. The decode itself is the usual one - the wire
+encodes a `1` as a transition rather than as a level, so the sampled levels are
+converted back to transitions before the four GCR quintets and the inverted checksum
+are read off, using the same table BLHeli and betaflight use.
+
+Two parts of the encoding differ from plain DShot and are easy to miss when reading a
+capture: the whole waveform is inverted, so the line idles high and a bit starts low,
+and the frame's checksum is inverted too. A DShot decoder set to the unidirectional
+protocol will show a capture of this as CRC failures rather than as nothing.
+
+The decode is exercised on the host rather than only on the bench, because it is
+portable arithmetic and the failure mode - a table index or a shift in the wrong
+direction - produces plausible looking eRPM rather than an obvious break. Encoding all
+4096 representable telemetry values the way an ESC would and decoding them back covers
+it in a way a bench run with one motor speed does not.
+
+Verified on the bench with a logic analyzer, with no ESC attached: inverted frames
+decode with passing checksums against a decoder set to bidirectional DShot600, and
+they keep coming at 1kHz. That second half is the useful part of the test - nothing
+ever answers, so every frame goes through the re-arm path, and a broken one would
+show as a single frame per channel followed by silence. The receive half is covered
+by the host test above rather than on the bench, and still wants a real ESC to
+confirm end to end.
+
+Not yet implemented: extended DShot telemetry (EDT), where an ESC reuses the exponent
+field to send temperature, voltage and current. Those frames currently decode as eRPM.
+The TX FIFO is deliberately left unjoined so that the RX FIFO stays available, which
+is what makes the response path possible at all.
 
 ## Threading
 

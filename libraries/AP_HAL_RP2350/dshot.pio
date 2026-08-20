@@ -51,3 +51,54 @@ do_one:
 do_zero:
     nop            side 0 [T2 - 1] ; a '0' has already gone low
 .wrap
+
+; Bidirectional DShot.
+;
+; The frame is inverted - the line idles high and every bit starts low - after
+; which the state machine stops driving the pin and samples the GCR encoded
+; eRPM response the ESC sends back.
+;
+; The response runs at 5/4 of the frame bit rate, so one state machine clock
+; has to divide both bit periods. 40 cycles per frame bit is the smallest that
+; does: it leaves a whole 32 cycles per response bit, and it still divides into
+; eighths for the 37.5%/75% frame bit encoding. The state machine therefore
+; runs at 40x the wire bit rate rather than the 8x the unidirectional program
+; needs.
+;
+; Nothing here bounds the wait for the response, because an ESC that is absent
+; or silent would need a counter wider than a SET instruction can load. The
+; driver puts a state machine still waiting at that point back to the top
+; instead, on the tick after the frame it was answering.
+
+.program bdshot
+.side_set 1
+
+.define public CYCLES_PER_BIT 40
+.define public RESPONSE_BITS 21
+.define FRAME_BITS 16
+.define T1 15                       ; a '0' is low through 37.5% of the bit
+.define T2 15
+.define T3 10                       ; the high tail every bit ends with
+
+.wrap_target
+    set pindirs, 1          side 1  ; drive the line; it idles high
+    pull block              side 1  ; one frame, left justified in the word
+    set y, (FRAME_BITS - 1) side 1
+bitloop:
+    out x, 1                side 1 [T3 - 2]
+    jmp !x do_zero          side 0 [T1 - 1] ; every bit starts low
+do_one:
+    jmp cont                side 0 [T2 - 1] ; a '1' stays low through 75%
+do_zero:
+    nop                     side 1 [T2 - 1] ; a '0' has already gone high
+cont:
+    jmp y-- bitloop         side 1
+
+    nop                     side 1 [T3 - 2] ; the last bit's tail, before letting go
+    set pindirs, 0          side 1
+    wait 0 pin 0            side 1  ; the ESC answers by pulling the line low
+    set y, (RESPONSE_BITS - 1) side 1 [15] ; half a response bit, to sample mid bit
+sample:
+    in pins, 1              side 1 [15]
+    jmp y-- sample          side 1 [15]     ; 21 bits, then autopush
+.wrap

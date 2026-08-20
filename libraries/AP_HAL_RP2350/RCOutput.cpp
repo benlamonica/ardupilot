@@ -19,6 +19,7 @@
 
 #if AP_HAL_RCOUTPUT_ENABLED
 
+#include <AP_ESC_Telem/AP_ESC_Telem.h>
 #include <AP_Math/AP_Math.h>
 
 #include <hardware/clocks.h>
@@ -63,6 +64,7 @@ void RCOutput::init()
 
     for (uint8_t b = 0; b < NUM_PIOS; b++) {
         _pio_offset[b] = -1;
+        _pio_bdshot_offset[b] = -1;
     }
 
     // set_freq() writes the wrap register, which is per slice
@@ -99,6 +101,11 @@ void RCOutput::set_output_mode(uint32_t mask, enum output_mode mode)
         return;
     }
 
+    // remembered so that a later change of direction can reload a state
+    // machine at the rate it was configured at; a board wanting different
+    // DShot rates on different channels would have to keep this per channel
+    _dshot_bitrate = bitrate;
+
     for (uint8_t i = 0; i < num_channels(); i++) {
         if ((mask & (1U << i)) == 0 || (_dshot_mask & (1U << i)) != 0) {
             continue;
@@ -109,52 +116,122 @@ void RCOutput::set_output_mode(uint32_t mask, enum output_mode mode)
     }
 }
 
+/*
+  Enable the eRPM response on a set of channels. AP_BLHeli calls this after
+  set_output_mode() has already moved channels onto DShot, so a channel whose
+  direction changed has to be reloaded with the other PIO program.
+*/
+void RCOutput::set_bidir_dshot_mask(uint32_t mask)
+{
+    if (mask == _bidir_mask) {
+        return;
+    }
+    _bidir_mask = mask;
+
+    for (uint8_t i = 0; i < num_channels(); i++) {
+        if ((_dshot_mask & (1U << i)) != 0 && !dshot_configure(i, _dshot_bitrate)) {
+            // the block could not hold the program this channel now needs, so
+            // leave it as it was rather than sending it frames in an encoding
+            // its state machine is not running
+            _bidir_mask &= ~(1U << i);
+        }
+    }
+}
+
+/*
+  Return where a DShot program sits in one PIO block's instruction memory,
+  loading it there if this is the first channel to need it. All four state
+  machines in a block then share the one copy.
+*/
+int8_t RCOutput::pio_program_offset(uint8_t block, bool bidir)
+{
+    int8_t &offset = bidir ? _pio_bdshot_offset[block] : _pio_offset[block];
+    if (offset < 0) {
+        PIO pio = pio_get_instance(block);
+        const pio_program_t *program = bidir ? &bdshot_program : &dshot_program;
+        if (pio_can_add_program(pio, program)) {
+            offset = pio_add_program(pio, program);
+        }
+    }
+    return offset;
+}
+
 bool RCOutput::dshot_configure(uint8_t chan, uint32_t bitrate)
 {
     const uint8_t gpio = channel_gpio[chan];
+    const bool bidir = (_bidir_mask & (1U << chan)) != 0;
 
-    for (uint8_t b = 0; b < NUM_PIOS; b++) {
-        PIO pio = pio_get_instance(b);
-
-        const int sm = pio_claim_unused_sm(pio, false);
-        if (sm < 0) {
-            // no free state machine in this block, try the next one
-            continue;
-        }
-        if (_pio_offset[b] < 0) {
-            // first DShot channel on this block, so load the program; all
-            // four of its state machines then share the one copy
-            if (!pio_can_add_program(pio, &dshot_program)) {
-                pio_sm_unclaim(pio, sm);
+    if ((_dshot_mask & (1U << chan)) == 0) {
+        // this channel has no state machine yet, so take a free one from a
+        // block whose instruction memory can also hold the program it needs
+        _dshot[chan].pio = nullptr;
+        for (uint8_t b = 0; b < NUM_PIOS; b++) {
+            PIO pio = pio_get_instance(b);
+            if (pio_program_offset(b, bidir) < 0) {
                 continue;
             }
-            _pio_offset[b] = pio_add_program(pio, &dshot_program);
+            const int sm = pio_claim_unused_sm(pio, false);
+            if (sm < 0) {
+                // no free state machine in this block, try the next one
+                continue;
+            }
+            _dshot[chan].pio = pio;
+            _dshot[chan].sm = sm;
+            break;
         }
-
-        pio_sm_config c = dshot_program_get_default_config(_pio_offset[b]);
-        sm_config_set_sideset_pins(&c, gpio);
-        /*
-          DShot sends most significant bit first, so shift left, and autopull
-          at 16 bits so that the state machine stalls between frames with the
-          line held low rather than running the frame back to back.
-        */
-        sm_config_set_out_shift(&c, false, true, 16);
-        // the program spends T1+T2+T3 = 8 cycles on each bit
-        sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (bitrate * 8));
-
-        pio_gpio_init(pio, gpio);
-        pio_sm_set_consecutive_pindirs(pio, sm, gpio, 1, true);
-        pio_sm_init(pio, sm, _pio_offset[b], &c);
-        pio_sm_set_enabled(pio, sm, true);
-
-        _dshot[chan].pio = pio;
-        _dshot[chan].sm = sm;
-        return true;
+        if (_dshot[chan].pio == nullptr) {
+            return false;
+        }
     }
-    return false;
+
+    PIO pio = _dshot[chan].pio;
+    const uint8_t sm = _dshot[chan].sm;
+    const int8_t offset = pio_program_offset(pio_get_index(pio), bidir);
+    if (offset < 0) {
+        return false;
+    }
+    _dshot[chan].entry = offset + (bidir ? bdshot_wrap_target : dshot_wrap_target);
+
+    pio_sm_config c = bidir ? bdshot_program_get_default_config(offset)
+                            : dshot_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, gpio);
+    /*
+      DShot sends most significant bit first, so shift left either way. The
+      unidirectional program autopulls at 16 bits, so that it stalls between
+      frames with the line held at idle rather than running them back to back;
+      the bidirectional one pulls for itself, because between frames it has to
+      reach the receiving half of its program instead of stalling.
+    */
+    sm_config_set_out_shift(&c, false, !bidir, 16);
+    if (bidir) {
+        // the program drives the pin only while it is sending, so it needs
+        // the pin as a SET target for the direction and as an IN source for
+        // the response
+        sm_config_set_set_pins(&c, gpio, 1);
+        sm_config_set_in_pins(&c, gpio);
+        sm_config_set_in_shift(&c, false, true, bdshot_RESPONSE_BITS);
+    }
+    // both programs spend a fixed number of state machine cycles on each
+    // frame bit, which is what sets the clock they have to run at
+    const uint32_t cycles = bidir ? bdshot_CYCLES_PER_BIT
+                                  : (dshot_T1 + dshot_T2 + dshot_T3);
+    sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (bitrate * cycles));
+
+    pio_gpio_init(pio, gpio);
+    if (bidir) {
+        // in the turnaround between the frame and the response neither end
+        // drives the line, so something has to hold it at its idle level
+        gpio_pull_up(gpio);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, gpio, 1, true);
+    // this also stops the state machine, clears its FIFOs and jumps it to the
+    // entry point, which is what makes it safe to call on a running channel
+    pio_sm_init(pio, sm, _dshot[chan].entry, &c);
+    pio_sm_set_enabled(pio, sm, true);
+    return true;
 }
 
-uint16_t RCOutput::dshot_packet(uint16_t value, bool telem_request)
+uint16_t RCOutput::dshot_packet(uint16_t value, bool telem_request, bool bidir)
 {
     uint16_t packet = (value << 1) | (telem_request ? 1 : 0);
 
@@ -165,8 +242,133 @@ uint16_t RCOutput::dshot_packet(uint16_t value, bool telem_request)
         csum ^= csum_data;
         csum_data >>= 4;
     }
+    if (bidir) {
+        // bidirectional DShot inverts the checksum, so that an ESC in one
+        // mode cannot act on a frame meant for the other
+        csum = ~csum;
+    }
 
     return (packet << 4) | (csum & 0xf);
+}
+
+/*
+  Turn one sampled response into the 12 bit telemetry value it carries.
+
+  The wire encodes a 1 as a level transition rather than as a level, so the
+  sampled levels are turned back into transitions first; the line idles high,
+  which supplies the level preceding the first sampled bit. What is left is
+  four GCR quintets and an inverted checksum, decoded with the same table
+  BLHeli and betaflight use.
+*/
+uint16_t RCOutput::bdshot_decode(uint32_t raw)
+{
+    const uint32_t top = 1U << (bdshot_RESPONSE_BITS - 1);
+    const uint32_t gcr = (raw ^ (raw >> 1) ^ top) & (top | (top - 1));
+
+    // a response begins by pulling the line off idle, so its first bit is
+    // always a transition; without one this is not a response at all
+    if ((gcr & top) == 0) {
+        return INVALID_ERPM;
+    }
+
+    static const uint8_t quintet[32] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 10, 11, 0, 13, 14, 15,
+        0, 0, 2, 3, 0, 5, 6, 7, 0, 0, 8, 1, 0, 4, 12, 0
+    };
+    uint16_t value = quintet[gcr & 0x1f];
+    value |= quintet[(gcr >> 5) & 0x1f] << 4;
+    value |= quintet[(gcr >> 10) & 0x1f] << 8;
+    value |= quintet[(gcr >> 15) & 0x1f] << 12;
+
+    const uint16_t csum = value ^ (value >> 4) ^ (value >> 8) ^ (value >> 12);
+    if ((csum & 0xf) != 0xf) {
+        return INVALID_ERPM;
+    }
+
+    return value >> 4;
+}
+
+/*
+  Collect the eRPM an ESC sent in answer to the previous frame. Called a whole
+  frame period after that frame went out, so an answer that has not arrived by
+  now is not coming.
+*/
+void RCOutput::bdshot_receive(uint8_t chan)
+{
+    PIO pio = _dshot[chan].pio;
+    const uint8_t sm = _dshot[chan].sm;
+
+    // the rate reported by get_erpm_error_rate() is meant to be a recent one,
+    // so the counters behind it are restarted rather than run for a flight
+    const uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - _bdshot.stats_ms[chan] > RP2350_ERPM_STATS_MS) {
+        _bdshot.stats_ms[chan] = now_ms;
+        _bdshot.errors[chan] = 0;
+        _bdshot.clean[chan] = 0;
+    }
+
+    uint32_t raw = 0;
+    bool answered = false;
+    while (!pio_sm_is_rx_fifo_empty(pio, sm)) {
+        // if more than one response is queued only the newest is of any use
+        raw = pio_sm_get(pio, sm);
+        answered = true;
+    }
+
+    if (!answered) {
+        _bdshot.errors[chan]++;
+        /*
+          Nothing came back, so the state machine is still sitting in its
+          unbounded wait for a response. Put it at the top of its program so
+          that a missing or silent ESC does not stop the frames going out.
+        */
+        pio_sm_set_enabled(pio, sm, false);
+        pio_sm_restart(pio, sm);
+        pio_sm_exec(pio, sm, pio_encode_jmp(_dshot[chan].entry));
+        pio_sm_set_enabled(pio, sm, true);
+        return;
+    }
+
+    const uint16_t telem = bdshot_decode(raw);
+    if (telem == INVALID_ERPM) {
+        _bdshot.errors[chan]++;
+        return;
+    }
+    _bdshot.clean[chan]++;
+
+    /*
+      What comes back is a period rather than a rate: a 9 bit mantissa shifted
+      up by a 3 bit exponent gives the microseconds between commutations. eRPM
+      is held in units of 100, as the other HALs do, so that a fast motor
+      still fits in 16 bits.
+    */
+    const uint32_t period_us = uint32_t(telem & 0x1ff) << ((telem >> 9) & 0x7);
+    uint16_t erpm = 0;
+    if (telem != ZERO_ERPM && period_us != 0) {
+        erpm = (600000U + period_us / 2) / period_us;
+    }
+
+    _bdshot.erpm[chan] = erpm;
+    _bdshot.update_mask |= 1U << chan;
+
+#if HAL_WITH_ESC_TELEM
+    /*
+      eRPM counts commutations, so the motor itself turns once every pole pair
+      of them. The example programs run without a vehicle, and so without the
+      frontend this reports into.
+    */
+    if (AP_ESC_Telem::get_singleton() != nullptr && _motor_poles > 0) {
+        update_rpm(chan, erpm * 200.0f / _motor_poles, get_erpm_error_rate(chan));
+    }
+#endif
+}
+
+uint32_t RCOutput::read_erpm(uint16_t *erpm, uint8_t len)
+{
+    memcpy(erpm, _bdshot.erpm, sizeof(uint16_t) * MIN(len, num_channels()));
+    const uint32_t mask = _bdshot.update_mask;
+    _bdshot.update_mask = 0;
+    return mask;
 }
 
 /*
@@ -250,7 +452,12 @@ void RCOutput::dshot_send()
             }
         }
 
-        const uint32_t frame = dshot_packet(value, telem_request);
+        const bool bidir = (_bidir_mask & (1U << i)) != 0;
+        if (bidir) {
+            bdshot_receive(i);
+        }
+
+        const uint32_t frame = dshot_packet(value, telem_request, bidir);
         if (!pio_sm_is_tx_fifo_full(_dshot[i].pio, _dshot[i].sm)) {
             // left justified, because the state machine shifts out of the top
             // of the output shift register

@@ -21,6 +21,7 @@
 #include "HAL_RP2350_Namespace.h"
 
 #include <AP_HAL/utility/RingBuffer.h>
+#include <AP_ESC_Telem/AP_ESC_Telem_Backend.h>
 
 #include <hardware/pio.h>
 
@@ -38,6 +39,10 @@
 // command occupies per repeat
 #define RP2350_DSHOT_PERIOD_US 1000
 
+// how long the counters behind get_erpm_error_rate() run before restarting,
+// so that the rate reported stays a recent one
+#define RP2350_ERPM_STATS_MS 5000
+
 #ifndef RP2350_RCOUT_DEFAULT_FREQ
 #define RP2350_RCOUT_DEFAULT_FREQ 50
 #endif
@@ -45,7 +50,7 @@
 namespace RP2350
 {
 
-class RCOutput : public AP_HAL::RCOutput
+class RCOutput : public AP_HAL::RCOutput, AP_ESC_Telem_Backend
 {
 public:
     void init() override;
@@ -71,13 +76,47 @@ public:
 
     uint32_t get_dshot_period_us() const override { return RP2350_DSHOT_PERIOD_US; }
 
+    void set_bidir_dshot_mask(uint32_t mask) override;
+    void set_motor_poles(uint8_t poles) override { _motor_poles = poles; }
+
+    uint16_t get_erpm(uint8_t chan) const override {
+        return chan < ARRAY_SIZE(_bdshot.erpm) ? _bdshot.erpm[chan] : 0;
+    }
+    float get_erpm_error_rate(uint8_t chan) const override {
+        if (chan >= ARRAY_SIZE(_bdshot.errors)) {
+            return 100.0f;
+        }
+        return 100.0f * float(_bdshot.errors[chan]) /
+               (1 + _bdshot.errors[chan] + _bdshot.clean[chan]);
+    }
+    bool new_erpm() override { return _bdshot.update_mask != 0; }
+    uint32_t read_erpm(uint16_t *erpm, uint8_t len) override;
+
 private:
+    // an eRPM response that did not decode
+    static const uint16_t INVALID_ERPM = 0xffffU;
+    // the value an ESC sends for a motor that is not turning
+    static const uint16_t ZERO_ERPM = 0x0fffU;
+
+    // where a DShot program sits in one PIO block's instruction memory,
+    // loading it there if this is the first channel to need it; -1 if that
+    // block's instruction memory cannot hold it
+    int8_t pio_program_offset(uint8_t block, bool bidir);
+
     // move one channel from its PWM slice to a PIO state machine running the
-    // DShot program at the given wire bit rate
+    // DShot program at the given wire bit rate, or reload one already moved
     bool dshot_configure(uint8_t chan, uint32_t bitrate);
 
     // build a DShot frame: 11 bit value, telemetry request, 4 bit checksum
-    static uint16_t dshot_packet(uint16_t value, bool telem_request);
+    static uint16_t dshot_packet(uint16_t value, bool telem_request, bool bidir);
+
+    // take the eRPM the ESC sent in answer to the previous frame, and put a
+    // state machine still waiting for one back at the top of its program
+    void bdshot_receive(uint8_t chan);
+
+    // turn one sampled 21 bit response into the telemetry value it carries,
+    // or INVALID_ERPM
+    static uint16_t bdshot_decode(uint32_t raw);
 
     // push a frame to every DShot channel; runs from the timer thread, as
     // ESCs disarm if frames stop arriving
@@ -116,16 +155,33 @@ private:
     ObjectBuffer<DshotCommandPacket> _dshot_command_queue{8};
     DshotCommandPacket _dshot_command;
 
-    // channels moved from PWM to DShot
+    // channels moved from PWM to DShot, and the wire bit rate they were
+    // moved at, which a later change of direction has to be reapplied at
     uint32_t _dshot_mask;
+    uint32_t _dshot_bitrate;
     struct {
         PIO pio;
         uint8_t sm;
+        uint8_t entry;  // program entry point, to restart a stalled machine
     } _dshot[16];
 
-    // where the DShot program sits in each PIO block's instruction memory,
-    // or -1 if it has not been loaded into that block yet
+    // where each DShot program sits in each PIO block's instruction memory,
+    // or -1 if it has not been loaded into that block yet. Both can be
+    // resident at once, so a board may mix bidirectional and plain channels.
     int8_t _pio_offset[NUM_PIOS];
+    int8_t _pio_bdshot_offset[NUM_PIOS];
+
+    // channels the ESC answers on with eRPM, from SERVO_BLH_BDMASK
+    uint32_t _bidir_mask;
+    uint8_t _motor_poles = 14;
+
+    struct {
+        uint16_t erpm[16];
+        uint32_t update_mask;
+        uint16_t errors[16];
+        uint16_t clean[16];
+        uint32_t stats_ms[16];
+    } _bdshot;
 };
 
 }

@@ -54,3 +54,52 @@ static inline pio_sm_config dshot_program_get_default_config(uint offset) {
 }
 #endif
 
+// ------ //
+// bdshot //
+// ------ //
+
+#define bdshot_wrap_target 0
+#define bdshot_wrap 13
+#define bdshot_pio_version 0
+
+#define bdshot_CYCLES_PER_BIT 40
+#define bdshot_RESPONSE_BITS 21
+
+static __pio_const uint16_t bdshot_program_instructions[] = {
+            //     .wrap_target
+    0xf081, //  0: set    pindirs, 1      side 1
+    0x90a0, //  1: pull   block           side 1
+    0xf04f, //  2: set    y, 15           side 1
+    0x7821, //  3: out    x, 1            side 1 [8]
+    0x0e26, //  4: jmp    !x, 6           side 0 [14]
+    0x0e07, //  5: jmp    7               side 0 [14]
+    0xbe42, //  6: nop                    side 1 [14]
+    0x1083, //  7: jmp    y--, 3          side 1
+    0xb842, //  8: nop                    side 1 [8]
+    0xf080, //  9: set    pindirs, 0      side 1
+    0x3020, // 10: wait   0 pin, 0        side 1
+    0xff54, // 11: set    y, 20           side 1 [15]
+    0x5f01, // 12: in     pins, 1         side 1 [15]
+    0x1f8c, // 13: jmp    y--, 12         side 1 [15]
+            //     .wrap
+};
+
+#if !PICO_NO_HARDWARE
+static __pio_const struct pio_program bdshot_program = {
+    .instructions = bdshot_program_instructions,
+    .length = 14,
+    .origin = -1,
+    .pio_version = bdshot_pio_version,
+#if PICO_PIO_VERSION > 0
+    .used_gpio_ranges = 0x0
+#endif
+};
+
+static inline pio_sm_config bdshot_program_get_default_config(uint offset) {
+    pio_sm_config c = pio_get_default_sm_config();
+    sm_config_set_wrap(&c, offset + bdshot_wrap_target, offset + bdshot_wrap);
+    sm_config_set_sideset(&c, 1, false, false);
+    return c;
+}
+#endif
+
