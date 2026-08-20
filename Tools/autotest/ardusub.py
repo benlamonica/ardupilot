@@ -1170,16 +1170,19 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.context_pop()
 
         dfreader = self.dfreader_for_current_onboard_log()
+        temp_min = 35
+        temp_max = 45
         while True:
             m = dfreader.recv_match(type='TEMP')
             if m is None:
                 break
             self.progress(m)
-            if m.Temp > 15 or m.Temp < 30:
+            if temp_min < m.Temp < temp_max:
                 # success!
                 break
         if m is None:
-            raise NotAchievedException("Did not get good TEMP message")
+            raise NotAchievedException(
+                f"Did not get good TEMP message (want {temp_min} < Temp < {temp_max})")
 
     def MAV_mgs(self):
         '''test individual GCS backends timestamps'''
@@ -1277,6 +1280,14 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
 
     def SurfaceSensorless(self):
         """Test surface mode with sensorless thrust"""
+        # this drives the throttle down and waits to arrive at 9.5m, so
+        # it has to start above that.  The vehicle is wherever the
+        # previous test left it, which can be a long way below:
+        #     Failed to attain Altitude want -9.5, reached -52.093
+        # with the depth not moving at all - it was already far past the
+        # altitude it was descending towards.  Reboot back to the
+        # surface first, as several tests in this file already do.
+        self.reboot_sitl()
         # set GCS failsafe to SURFACE
         self.wait_ready_to_arm()
         self.arm_vehicle()
