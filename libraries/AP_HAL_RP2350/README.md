@@ -6,9 +6,32 @@ this directory adapts them to the `AP_HAL` interfaces.
 
 **Status: early bring-up.** The build produces a complete firmware image, and runs
 under FreeRTOS on both Cortex-M33 cores, but only the Scheduler, Semaphores, GPIO,
-USB console UART and Util are implemented. Every other peripheral is wired to an
+serial ports and Util are implemented. Every other peripheral is wired to an
 `AP_HAL_Empty` stub, so there are no sensors, no motor output and no parameter
 storage yet. It has not been flight tested, and it is not airworthy.
+
+## Serial ports
+
+`SERIAL0` is the USB CDC console. The RP2350's two hardware UARTs become `SERIAL1`
+and `SERIAL2`, in the order the board's `hwdef.dat` declares them:
+
+```
+# RP2350_SERIAL <uart> <RX GPIO> <TX GPIO>
+RP2350_SERIAL uart0 1 0
+```
+
+The generator checks each GPIO against the RP2350's bank 0 function table, so a pin
+that cannot carry that signal is a configure-time error rather than a silent
+failure on the bench.
+
+Receive is interrupt driven, because at the higher GPS baud rates the 32-byte
+hardware FIFO overflows well inside the 1 kHz thread tick. Transmit is polled from
+that tick instead: the PL011 raises its TX interrupt only as the FIFO drains past
+the threshold, never from an empty FIFO, so an interrupt-driven path would still
+have to be primed by the writing thread and the queue would end up with two
+consumers. The cost is that a *sustained* stream is capped at one FIFO per tick,
+around 320 kbaud; bursts go out at full line rate. DMA would lift that if a port
+ever needs it.
 
 ## Threading
 
@@ -49,6 +72,7 @@ much faster than a full vehicle and isolate one subsystem:
 ```sh
 ./waf --targets examples/Printf      # console
 ./waf --targets examples/BinarySem   # threads and semaphores
+./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
 ```
 
 The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.

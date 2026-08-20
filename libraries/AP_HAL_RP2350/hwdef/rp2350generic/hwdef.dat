@@ -1,6 +1,14 @@
 # hwdef.dat for a generic RP2350 dev board (e.g. Raspberry Pi Pico 2 / Pico 2 W)
 #
-# Phase 1 bring-up target: boots and gives a USB-CDC console. No sensors or
+# Bring-up target: a USB-CDC console and the two hardware UARTs. No sensors or
 # other real peripherals are wired up yet (see the RP2350 port plan).
 
 define BOARD_NAME "rp2350generic"
+
+# RP2350_SERIAL <uart> <RX GPIO> <TX GPIO>
+#
+# These become SERIAL1 and SERIAL2; SERIAL0 is the USB CDC console. The pins
+# are the Pico's defaults, which are also the ones broken out on the standard
+# 40-pin header.
+RP2350_SERIAL uart0 1 0
+RP2350_SERIAL uart1 5 4

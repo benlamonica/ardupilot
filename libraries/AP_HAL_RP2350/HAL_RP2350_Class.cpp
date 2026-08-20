@@ -10,12 +10,20 @@
 #include "UARTDriver.h"
 #include "Util.h"
 
-// Phase 1 bring-up: only console UART, GPIO and Scheduler are real. Every
-// other peripheral is wired to AP_HAL_Empty's no-op stub until its driver
-// lands (see the RP2350 port plan, Phase 2).
-static RP2350::UARTDriver cons;
+// Bring-up: only the serial ports, GPIO and Scheduler are real. Every other
+// peripheral is wired to AP_HAL_Empty's no-op stub until its driver lands
+// (see the RP2350 port plan, Phase 2).
+static RP2350::UARTDriver cons(RP2350::UARTDriver::USB_CONSOLE);
+#ifdef HAL_RP2350_UART_DEVICES
+// the RP2350 has exactly two UARTs; each is an index into the table the
+// board's RP2350_SERIAL lines generate, and an index the board does not
+// declare leaves that port permanently uninitialised
+static RP2350::UARTDriver serial1Driver(0);
+static RP2350::UARTDriver serial2Driver(1);
+#else
 static Empty::UARTDriver serial1Driver;
 static Empty::UARTDriver serial2Driver;
+#endif
 static Empty::UARTDriver serial3Driver;
 static Empty::UARTDriver serial4Driver;
 static Empty::UARTDriver serial5Driver;
