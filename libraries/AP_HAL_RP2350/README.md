@@ -54,15 +54,19 @@ Erases are gated on being disarmed. The cost of the coarse blocks is that the lo
 fills after about 190 line writes and then needs a sector switch and a block erase;
 raising `STORAGE_SECTOR_SIZE` trades flash space for fewer erases.
 
-`AP_FlashStorage` can be exercised on the host with this layout, which is worth doing
-for anything touching the storage arithmetic - it covers the whole buffer, where the
-on-target `StorageTest` only reaches the areas StorageManager declares:
+`AP_FlashStorage` itself is exercised by `examples/FlashTest`, which is worth running
+for anything touching the storage arithmetic: it writes random offsets across the
+whole buffer, where `StorageTest` only reaches the areas StorageManager declares, and
+that gap has already hidden a real bug once.
+
+Run it on the board rather than on SITL. It simulates the flash in RAM, so it tests
+the layout rather than the hardware either way, but a standalone SITL example cannot
+show `hal.console` output at all: the drain happens in `_timer_tick()`, which is only
+reached from `stop_clock()` when a SITL vehicle state object exists. On SITL a
+failure is still visible, because panics go through stdio, but a pass is not.
 
 ```sh
-# set AP_FLASHSTORAGE_TYPE to AP_FLASHSTORAGE_TYPE_RP2350 in
-# libraries/AP_HAL/board/sitl.h first
-./waf configure --board sitl && ./waf --targets examples/FlashTest
-SITL_PANIC_EXIT=1 ./build/sitl/examples/FlashTest   # prints TEST PASSED, then idles
+./waf --targets examples/FlashTest   # prints TEST PASSED on the console
 ```
 
 ## Threading
