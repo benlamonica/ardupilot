@@ -72,5 +72,8 @@ void HAL_RP2350::run(int argc, char* const argv[], Callbacks* callbacks) const
 
     for (;;) {
         callbacks->loop();
+        // until Phase 2 gives the scheduler a real UART thread, the main
+        // loop is the only thing able to drain queued console output
+        cons._timer_tick();
     }
 }

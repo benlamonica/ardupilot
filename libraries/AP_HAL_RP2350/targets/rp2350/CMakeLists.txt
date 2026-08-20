@@ -45,7 +45,18 @@ endif()
 message("ARDUPILOT_CMD=${ARDUPILOT_CMD}")
 message("WAF_BUILD_TARGET=${WAF_BUILD_TARGET}")
 
-if(${ARDUPILOT_CMD} STREQUAL "copter")
+# examples/tools are small standalone programs (libraries/*/examples/*) used to
+# exercise one driver at a time on real hardware
+string(REGEX MATCH "^(examples|tool)/" IS_EXAMPLE "${WAF_BUILD_TARGET}")
+
+if(IS_EXAMPLE)
+    string(REPLACE "/" ";" A ${WAF_BUILD_TARGET})
+    list(GET A 0 EXAMPLE_BASE)
+    list(GET A 1 EXAMPLE_NAME)
+    message("Building ${EXAMPLE_BASE} ${EXAMPLE_NAME}")
+    target_link_libraries(${elf_file} "${ARDUPILOT_LIB}/${EXAMPLE_BASE}/lib${EXAMPLE_NAME}.a")
+    target_link_libraries(${elf_file} "${ARDUPILOT_LIB}/libap.a")
+elseif(${ARDUPILOT_CMD} STREQUAL "copter")
     message("Building for copter")
     target_link_libraries(${elf_file} "${ARDUPILOT_BIN}/libarducopter.a")
     target_link_libraries(${elf_file} "${ARDUPILOT_LIB}/libArduCopter_libs.a")

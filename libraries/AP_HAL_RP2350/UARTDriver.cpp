@@ -5,6 +5,10 @@
 
 using namespace RP2350;
 
+#ifndef HAL_RP2350_UART_TX_BUFSZ
+#define HAL_RP2350_UART_TX_BUFSZ 1024
+#endif
+
 /*
   This deliberately bypasses Pico-SDK's stdio_put_string()/printf() path:
   that layer does LF->CRLF translation (PICO_STDIO_ENABLE_CRLF_SUPPORT),
@@ -16,6 +20,9 @@ using namespace RP2350;
 
 void UARTDriver::_begin(uint32_t baud, uint16_t rxSpace, uint16_t txSpace)
 {
+    if (!_writebuf.set_size(txSpace ? txSpace : HAL_RP2350_UART_TX_BUFSZ)) {
+        return;
+    }
     if (!_initialized) {
         _initialized = stdio_usb_init();
     }
@@ -24,11 +31,48 @@ void UARTDriver::_begin(uint32_t baud, uint16_t rxSpace, uint16_t txSpace)
 void UARTDriver::_end()
 {
     _initialized = false;
+    _writebuf.set_size(0);
+}
+
+/*
+  push queued bytes into the CDC FIFO, as far as the host has drained it.
+  Anything that does not fit stays queued for the next call.
+*/
+void UARTDriver::drain_writebuf()
+{
+    if (!_initialized) {
+        return;
+    }
+    while (_writebuf.available() > 0) {
+        uint32_t avail = tud_cdc_write_available();
+        if (avail == 0) {
+            break;
+        }
+        uint8_t tmp[64];
+        uint32_t n = sizeof(tmp);
+        if (avail < n) {
+            n = avail;
+        }
+        if (_writebuf.available() < n) {
+            n = _writebuf.available();
+        }
+        n = _writebuf.read(tmp, n);
+        if (n == 0) {
+            break;
+        }
+        tud_cdc_write(tmp, n);
+    }
+    tud_cdc_write_flush();
+}
+
+void UARTDriver::_timer_tick()
+{
+    drain_writebuf();
 }
 
 void UARTDriver::_flush()
 {
-    tud_cdc_write_flush();
+    drain_writebuf();
 }
 
 bool UARTDriver::is_initialized()
@@ -38,15 +82,12 @@ bool UARTDriver::is_initialized()
 
 bool UARTDriver::tx_pending()
 {
-    return false;
+    return _writebuf.available() > 0;
 }
 
 uint32_t UARTDriver::txspace()
 {
-    if (!_initialized) {
-        return 0;
-    }
-    return tud_cdc_write_available();
+    return _writebuf.space();
 }
 
 uint32_t UARTDriver::_available()
@@ -74,14 +115,9 @@ size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
     if (!_initialized) {
         return 0;
     }
-    uint32_t avail = tud_cdc_write_available();
-    if (avail == 0) {
-        return 0;
-    }
-    uint32_t n = size < avail ? size : avail;
-    uint32_t written = tud_cdc_write(buffer, n);
-    tud_cdc_write_flush();
-    return written;
+    size_t ret = _writebuf.write(buffer, size);
+    drain_writebuf();
+    return ret;
 }
 
 ssize_t UARTDriver::_read(uint8_t *buffer, uint16_t size)
