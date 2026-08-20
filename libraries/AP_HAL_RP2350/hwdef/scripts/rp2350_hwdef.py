@@ -31,6 +31,9 @@ class RP2350HWDef(hwdef.HWDef):
         # list of RP2350_ADC_PIN declarations
         self.rp2350_adcs = []
 
+        # list of RP2350_RCOUT declarations
+        self.rp2350_rcout = []
+
     def write_hwdef_header_content(self, f):
         for d in self.alllines:
             if d.startswith('define '):
@@ -38,6 +41,7 @@ class RP2350HWDef(hwdef.HWDef):
 
         self.write_SERIAL_config(f)
         self.write_ADC_config(f)
+        self.write_RCOUT_config(f)
 
     def process_line(self, line, depth):
         '''process one line of pin definition file'''
@@ -52,6 +56,9 @@ class RP2350HWDef(hwdef.HWDef):
 
         if a[0] == 'RP2350_ADC_PIN':
             self.process_line_rp2350_adc(line, depth, a)
+
+        if a[0] == 'RP2350_RCOUT':
+            self.process_line_rp2350_rcout(line, depth, a)
 
         super(RP2350HWDef, self).process_line(line, depth, a)
 
@@ -84,6 +91,28 @@ class RP2350HWDef(hwdef.HWDef):
             adclist.append(f"{{ .channel={channel}, .scaling={scaling}, .ardupin={ardupin} }}")
 
         self.write_device_table(f, 'ADC pins', 'HAL_RP2350_ADC_PINS', adclist)
+
+    # RP2350_RCOUT support:
+    def process_line_rp2350_rcout(self, line, depth, a):
+        self.rp2350_rcout.append(a[1:])
+
+    def write_RCOUT_config(self, f):
+        '''write the PWM output channel list, in output channel order'''
+        outlist = []
+        slices = {}
+        for rcout in self.rp2350_rcout:
+            if len(rcout) != 1:
+                self.error(f"Badly formed RP2350_RCOUT line {rcout} {len(rcout)=} want=1")
+            (gpio,) = rcout
+            if not re.match(r'^\d+$', gpio) or int(gpio) > 47:
+                self.error(f"Bad RP2350_RCOUT GPIO {gpio}")
+            n = int(gpio)
+            if n in slices:
+                self.error(f"GPIO {n} used for more than one RP2350_RCOUT channel")
+            slices[n] = True
+            outlist.append(str(n))
+
+        self.write_device_table(f, 'PWM output channels', 'HAL_RP2350_RCOUT_CHANNELS', outlist)
 
     def check_serial_pin(self, port, num, pin, want_rx):
         '''check one RP2350_SERIAL GPIO against the bank 0 function table and

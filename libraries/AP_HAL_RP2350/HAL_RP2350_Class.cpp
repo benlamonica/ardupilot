@@ -26,6 +26,7 @@
 #include "GPIO.h"
 #include "UARTDriver.h"
 #include "AnalogIn.h"
+#include "RCOutput.h"
 #include "Storage.h"
 #include "Util.h"
 
@@ -61,7 +62,11 @@ static Empty::AnalogIn analogIn;
 static RP2350::Storage storageDriver;
 static RP2350::GPIO gpioDriver;
 static Empty::RCInput rcinDriver;
+#if AP_HAL_RCOUTPUT_ENABLED
+static RP2350::RCOutput rcoutDriver;
+#else
 static Empty::RCOutput rcoutDriver;
+#endif
 static RP2350::Scheduler schedulerInstance;
 static RP2350::Util utilInstance;
 static Empty::OpticalFlow opticalFlowDriver;

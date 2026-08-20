@@ -25,6 +25,7 @@ class DigitalSource;
 class UARTDriver;
 class AnalogIn;
 class AnalogSource;
+class RCOutput;
 class Storage;
 class Semaphore;
 class BinarySemaphore;

@@ -263,6 +263,7 @@ void Scheduler::_main_thread(void *arg)
     // process, and taking a FreeRTOS mutex before the scheduler is running
     // would dereference a null current task
     hal.analogin->init();
+    hal.rcout->init();
 
     sched->callbacks->setup();
     sched->set_system_initialized();

@@ -5,10 +5,10 @@ Espressif's ESP-IDF: the vendor SDK supplies the low-level peripheral drivers an
 this directory adapts them to the `AP_HAL` interfaces.
 
 **Status: early bring-up.** The build produces a complete firmware image, and runs
-under FreeRTOS on both Cortex-M33 cores, but only the Scheduler, Semaphores, GPIO,
-serial ports, parameter storage, analog inputs and Util are implemented. Every
-other peripheral is wired to an `AP_HAL_Empty` stub, so there are no sensors and no
-motor output yet. It has not been flight tested, and it is not airworthy.
+under FreeRTOS on both Cortex-M33 cores. The Scheduler, Semaphores, GPIO, serial
+ports, parameter storage, analog inputs, PWM outputs and Util are implemented; SPI,
+I2C and RC input are still wired to `AP_HAL_Empty` stubs, so there are no sensors and
+no way to fly it. It has not been flight tested, and it is not airworthy.
 
 ## Serial ports
 
@@ -92,6 +92,36 @@ and what a ratiometric sensor on this board would be powered from.
 Measured against the Pico's own rails, an input tied to 3V3 reads 3.297V and one tied
 to AGND reads 0.001V.
 
+## PWM outputs
+
+Motor and servo outputs are declared per board in `hwdef.dat`, in output channel
+order:
+
+```
+# RP2350_RCOUT <GPIO>
+RP2350_RCOUT 6
+RP2350_RCOUT 7
+```
+
+The counters are divided down to 1MHz so that a channel level is the pulse width in
+microseconds directly, which is the unit `AP_HAL::RCOutput` works in. A 16 bit wrap
+at that rate reaches 65535us, so any frame rate down to about 16Hz is available
+without touching the divisor.
+
+The constraint to know about is that a GPIO's PWM slice is `(gpio >> 1) & 7` and its
+channel within that slice is `gpio & 1`, so GPIOs pair up, and **both channels of a
+slice share one counter**. A pair can hold different pulse widths but not different
+frame rates: `set_freq()` on one channel changes its partner too. `get_freq()`
+reports the rate per slice rather than per channel so that it stays honest about
+this. Keep outputs that need different rates on different slices.
+
+Outputs sit low until a channel is both enabled and written, so nothing twitches
+during boot.
+
+Verified with a logic analyzer on GP6-GP13, driving eight distinct widths across the
+1000-2000us range at a mix of 50Hz and 400Hz: measured widths and periods matched the
+requested values, and each slice pair shared a period as expected.
+
 ## Threading
 
 FreeRTOS runs in SMP mode across both cores. Threads created by the HAL are pinned:
@@ -136,6 +166,7 @@ much faster than a full vehicle and isolate one subsystem:
 ./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
 ./waf --targets examples/StorageTest # parameter storage
 ./waf --targets examples/AnalogIn    # ADC, with a jumper to 3V3 or AGND
+./waf --targets examples/RCOutput    # PWM outputs, with a logic analyzer
 ```
 
 The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.

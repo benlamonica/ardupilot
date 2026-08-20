@@ -24,3 +24,19 @@ RP2350_SERIAL uart1 5 4
 RP2350_ADC_PIN 0 1.0 26
 RP2350_ADC_PIN 1 1.0 27
 RP2350_ADC_PIN 2 1.0 28
+
+# RP2350_RCOUT <GPIO>, one per line, in output channel order
+#
+# GP6-GP13 on the 40 pin header. The PWM slice for a GPIO is (gpio >> 1) & 7
+# and the channel within it is gpio & 1, so these eight outputs are four A/B
+# pairs on slices 3, 4, 5 and 6. Both channels of a slice share one counter,
+# so a pair can hold different pulse widths but NOT different frame rates:
+# keep outputs that need different rates on different slices.
+RP2350_RCOUT 6
+RP2350_RCOUT 7
+RP2350_RCOUT 8
+RP2350_RCOUT 9
+RP2350_RCOUT 10
+RP2350_RCOUT 11
+RP2350_RCOUT 12
+RP2350_RCOUT 13
