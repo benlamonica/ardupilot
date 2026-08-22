@@ -250,29 +250,77 @@ Tools/scripts/rp2350_get_freertos.sh
 
 `PICO_SDK_PATH` and `FREERTOS_KERNEL_PATH` may be set to use existing checkouts.
 
-Individual drivers are exercised with the standalone example programs, which build
-much faster than a full vehicle and isolate one subsystem:
+The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.
+
+To flash, hold BOOTSEL while plugging the board in, then copy the `.uf2` onto the
+mass-storage device the board presents (`/Volumes/RP2350` on macOS). The board
+reboots into the new firmware automatically. The `cp` reports `Device not configured`,
+which is normal - the board reboots part way through the write.
+
+Holding the button is only needed for a board that is not already running this
+firmware. Once it is, opening the USB CDC port at 1200 baud and closing it reboots the
+board into BOOTSEL by itself, which makes the whole edit/flash/capture cycle
+hands free.
+
+## Testing on hardware
+
+Each driver is exercised by a standalone program that builds in seconds rather than
+the minutes a vehicle takes, and that fails in one subsystem rather than in all of
+them at once. Several of ArduPilot's shared examples work here unchanged:
 
 ```sh
 ./waf --targets examples/Printf      # console
 ./waf --targets examples/BinarySem   # threads and semaphores
 ./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
 ./waf --targets examples/StorageTest # parameter storage
-./waf --targets examples/AnalogIn    # ADC, with a jumper to 3V3 or AGND
-./waf --targets examples/RCOutput    # PWM outputs, with a logic analyzer
+./waf --targets examples/FlashTest   # the AP_FlashStorage layout
 ```
 
-The output image is `build/rp2350generic/pico-sdk_build/ardupilot.uf2`.
+The rest live in `examples/` in this directory, because the shared ones assume things
+that are not true here - `examples/AnalogIn` walks pin numbers 0-15, and
+`examples/RCOutput` drives every channel with the same value, which cannot show that a
+given channel reaches the GPIO it claims to. These build the same way, and are built
+only for RP2350 boards:
 
-To flash, hold BOOTSEL while plugging the board in, then copy the `.uf2` onto the
-mass-storage device the board presents (`/Volumes/RP2350` on macOS). The board
-reboots into the new firmware automatically.
+```sh
+./waf --targets examples/RP2350_AnalogIn  # ADC, with a jumper to 3V3 or AGND
+./waf --targets examples/RP2350_RCOut     # PWM outputs, with a logic analyzer
+./waf --targets examples/RP2350_DShot     # DShot, commands and eRPM
+```
+
+None of them need editing to change what they test, which is the point: a bench
+session should not carry local modifications that have to be remembered and reverted
+afterwards. They discover the board's pins and channels through the `AP_HAL`
+interface - `valid_analog_pin()`, and `get_freq()` returning zero for an output that
+does not exist - so they follow a board's `hwdef.dat` rather than restating it.
+
+`RP2350_DShot` is driven from the console, so that changing one variable does not mean
+reflashing and losing the analyzer setup. Connect to the USB CDC port at any baud rate
+and press `?` for the key list:
+
+```sh
+screen /dev/cu.usbmodem*          # or any serial terminal
+```
+
+It asks which DShot rate to use during its first five seconds and then cannot be
+changed, because moving a channel from a PWM slice to a PIO state machine is one way
+in this driver. Everything else - arming, throttle, beep commands, and bidirectional
+mode - is switchable while it runs.
+
+Two things worth knowing before reading a capture. **A decoder has to be told the same
+rate and encoding the board is sending**, and bidirectional DShot inverts both the
+waveform and the frame checksum, so a decoder left on plain DShot reports CRC failures
+rather than nothing at all. And with no ESC attached, bidirectional mode reports 0 eRPM
+at a 100% error rate on every channel: that is the expected result, and the useful part
+of the test is that frames keep going out at 1kHz anyway, which is what exercises the
+re-arm path.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
 | `hwdef/<board>/hwdef.dat` | per-board configuration |
+| `examples/` | bench programs, built only for RP2350 boards |
 | `hwdef/scripts/rp2350_hwdef.py` | generates `hwdef.h` from `hwdef.dat` |
 | `targets/rp2350/CMakeLists.txt` | Pico-SDK CMake project that links the vehicle library |
 | `targets/rp2350/FreeRTOSConfig.h` | FreeRTOS SMP configuration |
