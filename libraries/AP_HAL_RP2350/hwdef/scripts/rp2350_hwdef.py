@@ -34,6 +34,10 @@ class RP2350HWDef(hwdef.HWDef):
         # list of RP2350_RCOUT declarations
         self.rp2350_rcout = []
 
+        # list of RP2350_SPIBUS and RP2350_SPIDEV declarations
+        self.rp2350_spibuses = []
+        self.rp2350_spidevs = []
+
     def write_hwdef_header_content(self, f):
         for d in self.alllines:
             if d.startswith('define '):
@@ -42,6 +46,9 @@ class RP2350HWDef(hwdef.HWDef):
         self.write_SERIAL_config(f)
         self.write_ADC_config(f)
         self.write_RCOUT_config(f)
+        self.write_SPI_config(f)
+        # BARO lines are handled entirely by the shared base class
+        self.write_BARO_config(f)
 
     def process_line(self, line, depth):
         '''process one line of pin definition file'''
@@ -59,6 +66,12 @@ class RP2350HWDef(hwdef.HWDef):
 
         if a[0] == 'RP2350_RCOUT':
             self.process_line_rp2350_rcout(line, depth, a)
+
+        if a[0] == 'RP2350_SPIBUS':
+            self.rp2350_spibuses.append(a[1:])
+
+        if a[0] == 'RP2350_SPIDEV':
+            self.rp2350_spidevs.append(a[1:])
 
         super(RP2350HWDef, self).process_line(line, depth, a)
 
@@ -113,6 +126,72 @@ class RP2350HWDef(hwdef.HWDef):
             outlist.append(str(n))
 
         self.write_device_table(f, 'PWM output channels', 'HAL_RP2350_RCOUT_CHANNELS', outlist)
+
+    # RP2350_SPIBUS / RP2350_SPIDEV support:
+    def check_spi_pin(self, bus, num, pin, role):
+        '''check one RP2350_SPIBUS GPIO against the bank 0 function table and
+        return it as an int'''
+        if not re.match(r'^\d+$', pin):
+            self.error(f"Bad RP2350_SPIBUS pin {pin} (want a GPIO number)")
+        n = int(pin)
+        # bank 0 lays the SPI pins out in groups of four as RX, CSn, SCK, TX,
+        # alternating between spi0 and spi1 every second group. CSn is not
+        # checked here because the driver drives chip select as a plain GPIO.
+        names = ['MISO', 'CS', 'SCK', 'MOSI']
+        if n > 47 or (n & 3) != role or ((n >> 3) & 1) != num:
+            self.error(f"GPIO {n} cannot be {bus} {names[role]}")
+        return n
+
+    def write_SPI_config(self, f):
+        '''write the SPI bus and device tables'''
+        buslist = []
+        # maps an spi0/spi1 name to its row in the bus table, which is what a
+        # device line refers to
+        busindex = {}
+        for spibus in self.rp2350_spibuses:
+            if len(spibus) != 4:
+                self.error(f"Badly formed RP2350_SPIBUS line {spibus} {len(spibus)=} want=4")
+            (bus, sck, mosi, miso) = spibus
+            m = re.match(r'^spi([01])$', bus)
+            if m is None:
+                self.error(f"Bad RP2350_SPIBUS name {bus} (want spi0 or spi1)")
+            num = int(m.group(1))
+            if bus in busindex:
+                self.error(f"RP2350_SPIBUS {bus} declared more than once")
+            busindex[bus] = len(buslist)
+            buslist.append("{{ .spi={}, .sck={}, .mosi={}, .miso={} }}".format(
+                num,
+                self.check_spi_pin(bus, num, sck, 2),
+                self.check_spi_pin(bus, num, mosi, 3),
+                self.check_spi_pin(bus, num, miso, 0)))
+
+        self.write_device_table(f, 'SPI buses', 'HAL_RP2350_SPI_BUSES', buslist)
+
+        devlist = []
+        seen = {}
+        for dev in self.rp2350_spidevs:
+            if len(dev) != 7:
+                self.error(f"Badly formed RP2350_SPIDEV line {dev} {len(dev)=} want=7")
+            (name, bus, devid, cs, mode, lspeed, hspeed) = dev
+            if bus not in busindex:
+                self.error(f"RP2350_SPIDEV {name} names {bus}, which has no RP2350_SPIBUS line")
+            if name in seen:
+                self.error(f"RP2350_SPIDEV {name} declared more than once")
+            seen[name] = True
+            m = re.match(r'^MODE([0-3])$', mode)
+            if m is None:
+                self.error(f"Bad RP2350_SPIDEV mode {mode} (want MODE0 to MODE3)")
+            if not re.match(r'^\d+$', devid):
+                self.error(f"Bad RP2350_SPIDEV devid {devid} (want a number)")
+            if not re.match(r'^\d+$', cs) or int(cs) > 47:
+                self.error(f"Bad RP2350_SPIDEV CS pin {cs} (want a GPIO number)")
+            devlist.append(
+                "{{ .name=\"{}\", .bus={}, .devid={}, .cs={}, .mode={}, "
+                ".lspeed={}, .hspeed={} }}".format(
+                    name, busindex[bus], int(devid), int(cs), int(m.group(1)),
+                    lspeed, hspeed))
+
+        self.write_device_table(f, 'SPI devices', 'HAL_RP2350_SPI_DEVICES', devlist)
 
     def check_serial_pin(self, port, num, pin, want_rx):
         '''check one RP2350_SERIAL GPIO against the bank 0 function table and

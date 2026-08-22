@@ -40,3 +40,25 @@ RP2350_RCOUT 10
 RP2350_RCOUT 11
 RP2350_RCOUT 12
 RP2350_RCOUT 13
+
+# RP2350_SPIBUS <spi> <SCK GPIO> <MOSI GPIO> <MISO GPIO>
+#
+# GP16-GP19 on the 40 pin header, which is the only free run of four that
+# lands on one SPI instance with the roles needed. Bank 0 lays the SPI pins
+# out in groups of four as RX, CSn, SCK, TX, alternating between spi0 and spi1
+# every second group, so the instance is (gpio >> 3) & 1 and the role within
+# it is gpio & 3.
+RP2350_SPIBUS spi0 18 19 16
+
+# RP2350_SPIDEV <name> <spi> <devid> <CS GPIO> <mode> <low speed> <high speed>
+#
+# Chip select is driven as a plain GPIO rather than as the hardware spi0_ss_n
+# on GP17: the PL022 deasserts its own select between frames, which would
+# split a multi byte register read into separate transactions. The devid ends
+# up in the sensor's DEVID parameter, so it is written here rather than being
+# taken from the order of these lines, which would change every stored ID if
+# a device were added above another.
+RP2350_SPIDEV dps310 spi0 3 17 MODE3 5*MHZ 5*MHZ
+
+# BARO <driver> SPI:<RP2350_SPIDEV name>
+BARO DPS310 SPI:dps310

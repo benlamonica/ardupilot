@@ -27,6 +27,7 @@
 #include "UARTDriver.h"
 #include "AnalogIn.h"
 #include "RCOutput.h"
+#include "SPIDevice.h"
 #include "Storage.h"
 #include "Util.h"
 
@@ -53,7 +54,11 @@ static Empty::UARTDriver serial8Driver;
 static Empty::UARTDriver serial9Driver;
 
 static Empty::I2CDeviceManager i2cDeviceManager;
+#if AP_HAL_SPI_ENABLED
+static RP2350::SPIDeviceManager spiDeviceManager;
+#else
 static Empty::SPIDeviceManager spiDeviceManager;
+#endif
 #if AP_HAL_ANALOGIN_ENABLED
 static RP2350::AnalogIn analogIn;
 #else

@@ -6,9 +6,10 @@ this directory adapts them to the `AP_HAL` interfaces.
 
 **Status: early bring-up.** The build produces a complete firmware image, and runs
 under FreeRTOS on both Cortex-M33 cores. The Scheduler, Semaphores, GPIO, serial
-ports, parameter storage, analog inputs, PWM outputs and Util are implemented; SPI,
-I2C and RC input are still wired to `AP_HAL_Empty` stubs, so there are no sensors and
-no way to fly it. It has not been flight tested, and it is not airworthy.
+ports, parameter storage, analog inputs, PWM outputs, SPI and Util are implemented,
+and a barometer runs on the SPI bus; I2C and RC input are still wired to
+`AP_HAL_Empty` stubs, so there is no IMU and no way to fly it. It has not been flight
+tested, and it is not airworthy.
 
 ## Serial ports
 
@@ -91,6 +92,71 @@ and what a ratiometric sensor on this board would be powered from.
 
 Measured against the Pico's own rails, an input tied to 3V3 reads 3.297V and one tied
 to AGND reads 0.001V.
+
+## SPI bus
+
+Buses and the devices on them are declared per board in `hwdef.dat`:
+
+```
+# RP2350_SPIBUS <spi> <SCK GPIO> <MOSI GPIO> <MISO GPIO>
+RP2350_SPIBUS spi0 18 19 16
+
+# RP2350_SPIDEV <name> <spi> <devid> <CS GPIO> <mode> <low speed> <high speed>
+RP2350_SPIDEV dps310 spi0 3 17 MODE3 5*MHZ 5*MHZ
+```
+
+Bank 0 lays the SPI pins out in groups of four as RX, CSn, SCK, TX, alternating
+between `spi0` and `spi1` every second group, so the instance is `(gpio >> 3) & 1` and
+the role within it is `gpio & 3`. As with the UART pins, the generator checks each one
+against that table so a pin that cannot carry the signal is a configure-time error.
+
+**Chip select is driven as a plain GPIO, never as the hardware `ss_n`.** The PL022
+deasserts its own select between frames, which would break a multi byte register read
+into separate transactions, and the sensor would answer only the first. The SDK's
+`spi_*` functions do not touch the line at all, so this is the normal arrangement on
+this chip rather than a workaround. It also means a device's CS can sit on any GPIO,
+not only the one its bus group nominates.
+
+The bit rate and frame format are reprogrammed on every transfer, because the
+peripheral holds one setting and the devices sharing a bus need not agree on either.
+That happens before the select goes low, since `spi_set_format()` disables the
+peripheral while it writes.
+
+`transfer()` clocks the send and receive halves as two SDK calls with the select held
+across both, rather than assembling one combined buffer as the other HALs do. It is
+the same transaction on the wire, and it keeps a long write off the bus thread's
+stack - a driver that pushes a configuration blob in a single call would otherwise
+size a variable length buffer there.
+
+Each bus gets a thread that runs the periodic callbacks its drivers registered, with
+the bus semaphore held across each one. That is a direct port of `AP_HAL_ESP32`'s
+`DeviceBus`, and I2C will reuse it. The thread is left unpinned so the SMP scheduler
+can place it.
+
+The `devid` column ends up in the sensor's `DEVID` parameter. It is written out rather
+than taken from the order of the `RP2350_SPIDEV` lines, so that inserting a device
+above another does not silently change every stored ID and make the vehicle think all
+its sensors were swapped.
+
+### Barometer
+
+A DPS310 is declared with a `BARO` line, which the shared `hwdef.py` turns into
+`HAL_BARO_PROBE_LIST`:
+
+```
+BARO DPS310 SPI:dps310
+```
+
+One thing this driver needed that is easy to miss: `AP_Baro_DPS280::init()` calls
+`set_chip_select()` to toggle the line without clocking anything, because the DPS310
+can come up in a state where its product ID reads back wrong. `set_chip_select()`
+defaults to a no-op stub in `AP_HAL::Device`, so leaving it unimplemented would have
+made the sensor probe on some boots and not others.
+
+Verified on a breadboard with an Adafruit DPS310 on `spi0`: 98954 Pa and 21.5C, with
+relative altitude holding inside +/-0.07m, which is about 0.35 Pa of noise. Quiet
+readings are the useful part of that - bad calibration coefficients give values that
+are stable but wrong, so the noise floor is what says the coefficient decode is right.
 
 ## PWM outputs
 
@@ -274,6 +340,7 @@ them at once. Several of ArduPilot's shared examples work here unchanged:
 ./waf --targets examples/UART_test   # serial ports, with a TX-RX loopback jumper
 ./waf --targets examples/StorageTest # parameter storage
 ./waf --targets examples/FlashTest   # the AP_FlashStorage layout
+./waf --targets examples/BARO_generic # the barometer, end to end
 ```
 
 The rest live in `examples/` in this directory, because the shared ones assume things
@@ -286,7 +353,14 @@ only for RP2350 boards:
 ./waf --targets examples/RP2350_AnalogIn  # ADC, with a jumper to 3V3 or AGND
 ./waf --targets examples/RP2350_RCOut     # PWM outputs, with a logic analyzer
 ./waf --targets examples/RP2350_DShot     # DShot, commands and eRPM
+./waf --targets examples/RP2350_SPI       # SPI bus, before any sensor driver
 ```
+
+`RP2350_SPI` is the one to reach for when a sensor will not probe. It dumps the low
+registers of every declared device, which separates a wiring or chip select fault from
+a driver problem: an all `00` or all `ff` dump is the wires, and plausible values mean
+the bus is fine and the fault is above it. The DPS310 answers `0x10` at register
+`0x0d`.
 
 None of them need editing to change what they test, which is the point: a bench
 session should not carry local modifications that have to be remembered and reverted
