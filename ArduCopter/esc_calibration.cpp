@@ -15,6 +15,18 @@ void Copter::esc_calibration_startup_check()
     }
 
 #if FRAME_CONFIG != HELI_FRAME
+    if (motors->is_digital_pwm_type()) {
+        // DShot ESCs have no throttle range to learn, so calibrating them
+        // only blocks boot. Drop any pending request.
+        if ((g.esc_calibrate != ESCCalibrationModes::ESCCAL_NONE) && (g.esc_calibrate != ESCCalibrationModes::ESCCAL_DISABLED)) {
+            g.esc_calibrate.set_and_save(ESCCalibrationModes::ESCCAL_NONE);
+            gcs().send_text(MAV_SEVERITY_WARNING, "ESC calibration: not needed for DShot, skipped");
+        }
+        return;
+    }
+#endif
+
+#if FRAME_CONFIG != HELI_FRAME
     // delay up to 2 second for first radio input
     uint8_t i = 0;
     while ((i++ < 100) && (last_radio_update_ms == 0)) {
