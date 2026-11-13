@@ -120,7 +120,17 @@ void UARTDriver::sio_begin(bool clear_buffers)
           would starve USB
          */
         const uint32_t uart_funcsel = sdef.uart_pin_funcsel ? sdef.uart_pin_funcsel : 2U;
-        if (sdef.tx_line != 0) {
+        // An RP2350 ioline_t is the bare GPIO number, so GP0 - UART0 TX -
+        // is line 0, which is also what hwdef emits for "no pin". Left
+        // unmuxed, GP0 stays at its reset FUNCSEL (NULL) and the UART
+        // transmits into nothing while receive on GP1 still works.
+        bool have_tx = sdef.tx_line != 0;
+#if defined(HAL_GPIO_PIN_UART0_TX)
+        if (sdef.instance == 0 && sdef.tx_line == HAL_GPIO_PIN_UART0_TX) {
+            have_tx = true;
+        }
+#endif
+        if (have_tx) {
             /* TX pin: board-specific FUNCSEL (UART alternate function), IE+SCHMITT */
             palSetLineMode(sdef.tx_line, PAL_MODE_ALTERNATE(uart_funcsel));
         }
