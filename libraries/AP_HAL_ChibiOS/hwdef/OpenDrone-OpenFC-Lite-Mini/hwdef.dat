@@ -1,0 +1,287 @@
+# hw definition file for processing by chibios_hwdef.py
+# OpenDrone OpenFC-Lite-Mini (RP2354A, QFN-60, 2 MB stacked flash).
+#
+# 20x20 mm flight controller from the incutec OpenDrone line, designed for
+# Betaflight. Pin assignments follow the KiCad schematic (OpenFC.kicad_sch,
+# rev 3.1), which is the authority for every GPIO here.
+#
+# Platform configuration (clock, QMI, SMP, core affinity) follows RPI_UAVFC;
+# the flash layout follows RPI_UAVFC, with the AP bootloader in front of the
+# application.
+#
+# The board has no SWD pads and RUN is tied to 3V3. Recovery is the BOOTSEL
+# button only, which is in ROM and cannot be bricked.
+
+MCU PICO2 PICO2
+
+APJ_BOARD_ID AP_HW_OPENDRONE_OPENFC_LITE_MINI
+
+# The directory name is over the 23 character limit for the board name.
+define CHIBIOS_SHORT_BOARD_NAME "OpenFC-Lite-Mini"
+
+# 12 MHz crystal (X1).
+OSCILLATOR_HZ 12000000
+# X1 often needs longer than the default XOSC timeout (100 ms nominal, but
+# timed on a ROSC assumed to be 6 MHz, so ~30-55 ms real) to start from cold,
+# and a timeout halts before USB. Count 64x longer and wait up to ~1-2 s.
+define RP_XOSC_STARTUP_DELAY_MULTIPLIER 64U
+define RP_XOSC_STABLE_TIMEOUT_US 2000000U
+
+# RP2354A: 2 MB flash stacked in the package, on the QMI like an external part.
+FLASH_SIZE_KB 2048
+define RP_FLASH_SIZE (BOARD_FLASH_SIZE * 1024U)
+# Flash layout, one region per 64 KB erase block:
+#   Bootloader:        block 0, 0x10000000-0x1000FFFF (32 KB used)
+#   Parameter storage: block 1, 0x10010000-0x1001FFFF (32 KB used, pages 16-23)
+#   App:               block 2 onwards, 0x10020000-0x101FFFFF (1920 KB)
+FLASH_RESERVE_START_KB 128
+STORAGE_FLASH_PAGE 16
+define AP_FLASH_STORAGE_QUAD_PAGE 1
+define HAL_STORAGE_SIZE 8192
+define HAL_WITH_RAMTRON 0
+# A flash write stops XIP on both cores, so defer storage writes until disarmed.
+define AP_STORAGE_NO_WRITE_WHILE_ARMED 1
+
+define AP_BOOTLOADER_FLASHING_ENABLED 0
+define HAL_WITH_EKF_DOUBLE 0
+define HAL_EKF_IMU_MASK_DEFAULT 1
+
+USB_STRING_MANUFACTURER "OpenDrone"
+
+# SERIAL0: USB CDC
+# SERIAL1: UART0, GP0/GP1, digital VTX connector (U8 pins 3/4) and pads
+# SERIAL2: UART1, GP6/GP7, RX pads; GP7 also reaches the VTX connector pin 6
+# SERIAL3: PIOUART0, GP2/GP3, pads; GP3 also reaches the ESC connector pin 4
+SERIAL_ORDER OTG1 UART0 UART1 PIOUART0
+
+define HAL_OTG1_PROTOCOL SerialProtocol_MAVLink2
+define HAL_OTG1_BAUD 115200
+define DEFAULT_SERIAL1_PROTOCOL            SerialProtocol_RCIN
+define DEFAULT_SERIAL2_PROTOCOL            SerialProtocol_GPS
+# GP3 is shared with the ESC telemetry line, so this port is left for the user
+# to assign: ESC telemetry (16) with a 4-in-1 ESC, or GPS (5) without one.
+define DEFAULT_SERIAL3_PROTOCOL            SerialProtocol_None
+
+# --------------------------------------------------------------------------
+# Pins
+# --------------------------------------------------------------------------
+
+PB0 OTG_FS_DM OTG1
+PB1 OTG_FS_DP OTG1
+
+# SWD is not routed on this board.
+
+PA0 UART0_TX UART0
+PA1 UART0_RX UART0
+
+PA6 UART1_TX UART1
+PA7 UART1_RX UART1
+
+# GP2/GP3 can only reach UART0, which GP0/GP1 already own, so the third port
+# is a PIO UART. Both pins are below GP16, so the PIO window starts at 0.
+PA2 PIOUART0_TX INPUT FLOATING
+PA3 PIOUART0_RX INPUT FLOATING
+define PIOUART_GPIOBASE 0
+
+# I2C0 - external pads, 5.1k pull-ups to 3V3 on board (R6/R7).
+PA4 I2C0_SDA I2C0
+PA5 I2C0_SCL I2C0
+I2C_ORDER I2C0
+# The only I2C bus is external.
+define HAL_I2C_INTERNAL_MASK 0
+NODMA I2C*
+
+# SPI1 - BMI270 IMU (U9)
+PA10 SPI1_SCK SPI1
+PA12 SPI1_MISO SPI1
+PA11 SPI1_MOSI SPI1
+PA13 IMU1_CS  CS
+# BMI270 INT1. The driver reads the FIFO on a timer, so nothing consumes it.
+PA9  IMU1_DRDY INPUT
+
+# SPI0 - microSD (Card1). DAT3 is the chip select; there is no card-detect.
+PA18 SPI0_SCK SPI0
+PA20 SPI0_RX  SPI0
+PA19 SPI0_TX  SPI0
+PA21 SDCARD_CS CS
+
+# Motor outputs M1-M4 on the 8-pin ESC connector (P1 pins 5-8) and pads.
+# M1 is GP25 and M4 is GP22, so channel numbers run opposite to GPIO numbers.
+# PWM 1-2 are slice 4 and PWM 3-4 slice 3, so each rate group is one slice.
+# DShot comes out of PIO2 (RCOutput_pico.cpp), which stays at GPIOBASE 0.
+PA25 PWM4_B TIM4 PWM(1) GPIO(50)
+PA24 PWM4_A TIM4 PWM(2) GPIO(51)
+PA23 PWM3_B TIM3 PWM(3) GPIO(52)
+PA22 PWM3_A TIM3 PWM(4) GPIO(53)
+
+# Blue status LED D2, active high through 150R.
+PA26 LED0 OUTPUT LOW GPIO(90)
+define AP_NOTIFY_GPIO_LED_1_ENABLED 1
+define AP_NOTIFY_GPIO_LED_1_PIN 90
+define HAL_GPIO_LED_ON 1
+
+# Buzzer: GP17 drives the gate of low-side MOSFET Q5 (100k pull-down) on the
+# BUZZER- pad. Expects a self-oscillating 5V buzzer, as on Betaflight boards.
+PA17 BUZZER OUTPUT LOW GPIO(80)
+define HAL_BUZZER_PIN 80
+
+# 10V VTX rail enable, straight to the LMR51430 EN (U3) with no pull resistor.
+# On at boot to match the Betaflight target's switchable-10V behaviour;
+# RELAY2 switches it.
+PA27 VTX_PWR OUTPUT HIGH GPIO(81)
+define RELAY2_PIN_DEFAULT 81
+define RELAY2_DEFAULT 1
+
+# Analog video switch U18. Low passes the camera through (B1 -> A), which is
+# all that is wanted without an analog OSD driver.
+PA15 OSD_EN OUTPUT LOW
+
+# Analog inputs. VBAT is 100k/10k (R1/R2); current comes from the ESC through
+# a 1k/100nF filter (R9/C22).
+PA29 BATT_VOLTAGE_SENS ADC1 SCALE(1)
+PA28 BATT_CURRENT_SENS ADC1 SCALE(1)
+
+# Not used by this port:
+# - GP8 LED_STRIP_L drives Q6, which inverts the signal onto the LED_STRIP pad
+#   (open drain, 2.4k pull-up). SerialLED has no output inversion, so it is
+#   left off rather than sending an inverted WS2812 stream.
+# - GP14 OSD_W, GP16 OSD_SYNC: Betaflight's PIO analog OSD. No ArduPilot
+#   driver exists; for a digital VTX set a free port to MSP DisplayPort (42).
+
+# --------------------------------------------------------------------------
+# SPI devices and sensors
+# --------------------------------------------------------------------------
+
+SPIDEV bmi270 SPI1 DEVID1 IMU1_CS   MODE3 2*MHZ 8*MHZ
+SPIDEV sdcard SPI0 DEVID2 SDCARD_CS MODE0 400*KHZ 25*MHZ
+
+# U9 is face-up on the top side and placed at 90 degrees (OpenFC.kicad_pcb),
+# so the chip's Z points up and its X/Y are turned a quarter turn from the
+# board arrow. Measured 2026-10-31 from accel poses (flat, arrow down, right
+# side down) with AHRS_ORIENTATION 0.
+IMU BMI270 SPI:bmi270 ROTATION_ROLL_180_YAW_90
+
+# No barometer on the board; an external one can go on I2C0.
+define HAL_BARO_ALLOW_INIT_NO_BARO 1
+
+# --------------------------------------------------------------------------
+# Feature configuration
+# --------------------------------------------------------------------------
+
+undef HAL_CHIBIOS_ARCH_FMUV3
+define AP_FEATURE_BOARD_DETECT 0
+define HAL_HAVE_SAFETY_SWITCH 0
+define HAL_WITH_MCU_MONITORING 1
+define HAL_HAVE_IMU_HEATER 0
+
+define HAL_OS_FATFS_IO 1
+define HAL_LOGGING_BACKEND_DEFAULT_ENABLED 1
+# Sync the log every 32 KB, as RPI_UAVFC does.
+define AP_FATFS_MAX_IO_SIZE 32768
+
+define HAL_BATT_MONITOR_DEFAULT 4
+# ADC channel index, not GPIO: GP28 = ADC2, GP29 = ADC3.
+define HAL_BATT_VOLT_PIN 3
+define HAL_BATT_CURR_PIN 2
+define HAL_BATT_VOLT_SCALE 11.0
+# Depends on the ESC's current sensor; 40 A/V is a common 4-in-1 value.
+define HAL_BATT_CURR_SCALE 40
+
+define AP_RCOUT_USE_32BIT_TIME 1
+define HAL_MAIN_LOOP_STUCK_THRESHOLD_MS 1200
+
+define AP_RP2350_PC_SAMPLER_ENABLED 0
+define AP_RP2350_DEBUG_REPORT_ENABLED 1
+define AP_RP2350_SPI_CYCLE_STATS_ENABLED 0
+define ST_TIMER_ALARM2_SUPPRESS_ISR
+define ST_TIMER_ALARM3_SUPPRESS_ISR
+
+define HAL_I2C_MAX_CLOCK 100000
+define AP_NOTIFY_OREOLED_ENABLED 0
+define HAL_SOLO_GIMBAL_ENABLED 0
+undef AP_BATTERY_SMBUS_SOLO_ENABLED
+define AP_BATTERY_SMBUS_SOLO_ENABLED 0
+define AP_CRASHDUMP_ENABLED 0
+define AP_COMPASS_PROBING_ENABLED 1
+define HAL_GYROFFT_ENABLED 0
+# Already off on a 2 MB flash part (HAL_PROGRAM_SIZE_LIMIT_KB); stated here so
+# the RP2350 RAM function list knows not to expect them.
+define AP_VOLZ_ENABLED 0
+define AP_ROBOTISSERVO_ENABLED 0
+define HAL_WITH_DSP FALSE
+
+# MSP DisplayPort needs AP_OSD built.
+define OSD_ENABLED                         1
+define HAL_OSD_TYPE_DEFAULT                5
+ROMFS_WILDCARD libraries/AP_OSD/fonts/font*.bin
+
+define HAL_USE_PAL                         TRUE
+define HAL_USE_SIO                         TRUE
+define HAL_USE_I2C                         TRUE
+define RP_I2C_USE_I2C0                     TRUE
+define RP_I2C_USE_I2C1                     FALSE
+define HAL_USE_SPI                         TRUE
+define RP_SPI_USE_SPI0                     TRUE
+define RP_SPI_USE_SPI1                     TRUE
+define HAL_USE_ADC                         TRUE
+define RP_ADC_USE_ADC1                     TRUE
+define HAL_USE_CAN                         FALSE
+define HAL_USE_CRY                         FALSE
+define HAL_USE_DAC                         FALSE
+define HAL_USE_EFL                         TRUE
+define HAL_USE_GPT                         FALSE
+define HAL_USE_I2S                         FALSE
+define HAL_USE_ICU                         FALSE
+define HAL_USE_EICU                        FALSE
+define HAL_USE_MAC                         FALSE
+define HAL_USE_MMC_SPI                     TRUE
+define HAL_USE_PWM                         TRUE
+define HAL_DSHOT_ENABLED                   1
+define HAL_SERIALLED_ENABLED               0
+define HAL_SERIAL_ESC_COMM_ENABLED         0
+define HAL_USE_RTC                         FALSE
+define HAL_USE_SDC                         FALSE
+define HAL_USE_SERIAL                      FALSE
+define HAL_USE_SERIAL_USB                  TRUE
+define HAL_USE_TRNG                        FALSE
+define HAL_USE_UART                        FALSE
+define AP_HAL_UARTDRIVER_ENABLED           1
+define HAL_USE_USB                         TRUE
+define HAL_USE_WSPI                        FALSE
+define HAL_USE_WDG                         TRUE
+define HAL_WATCHDOG_ENABLED_DEFAULT        0
+define DISABLE_WATCHDOG                    1
+define HAL_MONITOR_THREAD_ENABLED 0
+
+define PAL_USE_CALLBACKS                   TRUE
+define PAL_USE_WAIT                        TRUE
+define RP_USB_USE_USB1                     TRUE
+
+# Core affinity: the IMU is on SPI1 here, not SPI0 as on RPI_UAVFC, so its
+# bus thread goes to core1 with the rate thread and the microSD bus (SPI0)
+# stays on core0.
+define CH_CFG_SMP_MODE TRUE
+define RP_CORE1_START TRUE
+define AP_THREAD_CORE_TABLE { "rate", 1 }, { "rcout", 1 }, { "SPI1", 1 }, { "SPI0", 0 }, { "I2C0", 0 }
+
+# 225 MHz, as Pico2W and RPI_UAVFC. A multiple of 75 MHz, which the
+# bidirectional DShot decoder requires. To fall back to 150 MHz, delete the
+# three PLL defines, MCU_CLOCKRATE_MHZ and RP_VREG_VSEL.
+define RP_PLL_SYS_VCO_FREQ 900000000
+define RP_PLL_SYS_POSTDIV1 4
+define RP_PLL_SYS_POSTDIV2 1
+MCU_CLOCKRATE_MHZ 225
+define RP_VREG_VSEL 12
+
+# QMI timing for 225 MHz: 75 MHz SCK, sampling at 11.1 ns. Characterised on
+# the Laurel flash, not the RP2354A's stacked part - the first suspect if XIP
+# is unreliable at this clock.
+define RP_QMI_CLKDIV 3
+define RP_QMI_RXDELAY 2
+
+# As RPI_UAVFC: the main loop shares core0 with the estimators, so the GCS tasks
+# run at 25 Hz; the rate thread on core1 needs a deeper stack than the default,
+# and a deeper gyro queue rides out core0 stalls.
+define AP_GCS_UPDATE_RATE_HZ 25
+define AP_RATE_THREAD_STACK_SIZE 5120
+define AP_INERTIAL_SENSOR_RATE_LOOP_BUFFER_SIZE 32

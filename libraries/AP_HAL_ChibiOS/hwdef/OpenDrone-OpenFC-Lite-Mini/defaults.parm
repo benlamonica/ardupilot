@@ -1,0 +1,31 @@
+# OpenDrone OpenFC-Lite-Mini defaults
+
+# As RPI_UAVFC: a 200 Hz main loop on core0 and the rate thread on core1. The
+# BMI270 backend runs at a fixed 1600 Hz, so FSTRATE_DIV 1 gives a 1600 Hz
+# rate thread, matching the rate this board flew at on rp2350-v6.
+SCHED_LOOP_RATE 200
+FSTRATE_ENABLE 2
+FSTRATE_DIV 1
+INS_FAST_SAMPLE 1
+EK3_IMU_MASK 1
+
+# Quad, BetaFlightX motor order, so M1-M4 match the pads and ESC connector
+# pinout of the Betaflight target this board was designed for.
+FRAME_CLASS 1
+FRAME_TYPE 12
+
+# DShot600, the mode the PIO driver implements.
+MOT_PWM_TYPE 6
+SERVO1_FUNCTION 33
+SERVO2_FUNCTION 34
+SERVO3_FUNCTION 35
+SERVO4_FUNCTION 36
+
+# Watchdog off during bring-up, matching DISABLE_WATCHDOG in hwdef.dat.
+BRD_OPTIONS 0
+
+# 10V VTX rail on RELAY2.
+RELAY2_FUNCTION 1
+
+# ELRS/CRSF receiver on SERIAL1: take RSSI from the RC protocol.
+RSSI_TYPE 3
