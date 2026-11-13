@@ -587,14 +587,14 @@ modules/ChibiOS/os/hal/ports/RP/LLD/TIMERv1/hal_st_lld.c|Vector44
 modules/ChibiOS/os/rt/src/chthreads.c|chThdSuspendTimeoutS
 (profiled)|AP_InertialSensor::set_rate_decimation
 (profiled)|ByteBuffer::commit
-(profiled)|AP_Volz_Protocol::update
+(profiled)|AP_Volz_Protocol::update  # [unless AP_VOLZ_ENABLED]
 (profiled)|AP_FETtecOneWire::init_uart
 (profiled)|Vector3<float>::operator-
 (profiled)|AP_SerialManager::find_serial
 (profiled)|AP_FETtecOneWire::init
 (profiled)|SRV_Channels::push
 (profiled)|AP_SBusOut::update
-(profiled)|AP_RobotisServo::update
+(profiled)|AP_RobotisServo::update  # [unless AP_ROBOTISSERVO_ENABLED]
 (profiled)|AP_BLHeli::update_telemetry  # [unless HAL_SUPPORT_RCOUT_SERIAL]
 (profiled)|AP::serialmanager
 (profiled)|AP_SerialManager::find_protocol_instance
