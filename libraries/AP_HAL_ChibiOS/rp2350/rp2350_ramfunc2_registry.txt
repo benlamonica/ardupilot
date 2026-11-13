@@ -50,6 +50,23 @@ libraries/AP_AHRS/AP_AHRS_Backend.cpp|AP_AHRS::update_cd_values  # 112 B (sram)
 libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::update  # 520 B (sram)
 libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::matrix_update  # 194 B (sram)
 libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::drift_correction  # 1792 B (sram)
+# The rest of the DCM update and its results copy. Measured on an
+# OpenFC-Lite-Mini at 225 MHz with the DWT cycle counter: AP_AHRS_DCM::update
+# 100 us -> 60 us warm and get_results 145 us -> 101 us, for about 3 KB.
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::get_results
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::groundspeed_vector
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::get_location
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::get_velocity_NED
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::get_vert_pos_rate_D
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::get_origin
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::normalize  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::renorm  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::drift_correction_yaw  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::yaw_error_compass  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::use_compass  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::check_matrix  # [inlinable]
+libraries/AP_AHRS/AP_AHRS_DCM.cpp|AP_AHRS_DCM::backup_attitude  # [inlinable]
+libraries/AP_Math/matrix3.cpp|Matrix3<float>::rotate  # [inlinable]
 
 # AP_DAL: the EKF's sensor abstraction, 3.8% of core0 non-idle in 2.3 KB and
 # entirely XIP-resident before this. Only the entries the profile actually hit
