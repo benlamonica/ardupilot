@@ -1982,9 +1982,14 @@ INCLUDE common.ld
                     if label not in self.bylabel:
                         self.error("Missing pin label %s for PIOUART" % label)
                     pin = self.bylabel[label].pin
-                    # PIOUART sets GPIOBASE=16, so its 5-bit pin fields reach GPIO16-47 only
-                    if pin < 16 or pin > 47:
-                        self.error("%s on GPIO%u: PIOUART pins must be GPIO16-47" % (label, pin))
+                    # PIOUART pin fields are 5-bit and relative to PIOUART_GPIOBASE:
+                    # 16 (the default) reaches GPIO16-47, 0 reaches GPIO0-31
+                    base = self.intdefines.get('PIOUART_GPIOBASE', 16)
+                    if base not in (0, 16):
+                        self.error("PIOUART_GPIOBASE must be 0 or 16")
+                    if pin < base or pin > base + 31:
+                        self.error("%s on GPIO%u: PIOUART pins must be GPIO%u-%u with PIOUART_GPIOBASE %u" %
+                                   (label, pin, base, base + 31, base))
                     f.write('#define %s_PIN %uU\n' % (label, pin))
                 # PIOUART has no HAL_xxx_CONFIG entry -- not added to devlist
                 continue
