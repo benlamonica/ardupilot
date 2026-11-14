@@ -757,7 +757,11 @@ bool AP_BLHeli::BL_SendCMDSetAddress()
     if (!BL_SendBuf(sCMD, 4)) {
         return false;
     }
-    return BL_GetACK() == brSUCCESS;
+    if (BL_GetACK() != brSUCCESS) {
+        blheli.ack = ACK_D_GENERAL_ERROR;
+        return false;
+    }
+    return true;
 }
 
 bool AP_BLHeli::BL_ReadA(uint8_t cmd, uint8_t *buf, uint16_t n)
