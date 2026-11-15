@@ -72,6 +72,17 @@ public:
 
     // channels bound so far, as a mask
     static uint32_t channel_mask(void) { return _chan_mask; }
+
+    /*
+      ESC serial passthrough: stop a channel's state machine and hand its pad
+      back to the caller as plain GPIO, and later give it back to the PIO.
+      A paused channel is out of channel_mask(), so write_frame() and
+      read_telemetry() ignore it.
+      pause_channel() returns the GPIO number, or -1 if the channel is not bound.
+     */
+    static int8_t pause_channel(uint8_t chan);
+    static void resume_channel(uint8_t chan);
+    static uint32_t paused_mask(void) { return _paused_mask; }
 #endif // HAL_DSHOT_ENABLED
 
 #if HAL_SERIALLED_ENABLED
@@ -136,6 +147,7 @@ private:
     static bool     _bidir;
     static uint32_t _chan_mask;
     static uint8_t  _gpio[MAX_CHANNELS];
+    static uint32_t _paused_mask;
 
     // sample counts at which a run becomes 1, 2, 3 or 4 bits long
     static uint8_t  _len_transition[4];

@@ -3126,6 +3126,9 @@ void RCOutput::timer_info(ExpandingString &str)
         str.printf("PWM%-2u MODE=%5s\n", group.timer_id,
                    get_output_mode_string(group.current_mode));
     }
+#if HAL_DSHOT_ENABLED && AP_RP2350_ESC_PASSTHROUGH_ENABLED
+    serial_passthrough_info(str);
+#endif
 #elif HAL_DSHOT_ENABLED
     for (auto &group : pwm_group_list) {
         uint32_t target_freq;

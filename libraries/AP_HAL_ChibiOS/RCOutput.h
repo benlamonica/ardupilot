@@ -23,6 +23,18 @@
 
 #include "shared_dma.h"
 
+#ifndef AP_RP2350_ESC_PASSTHROUGH_ENABLED
+// ESC serial passthrough (BLHeli configuration and flashing) on the RP2350 PIO DShot outputs
+#define AP_RP2350_ESC_PASSTHROUGH_ENABLED 0
+#endif
+
+#ifndef AP_RP2350_ESC_PASSTHROUGH_SETTLE_MS
+// how long passthrough holds the motor lines high, with no traffic, after
+// taking them off DShot. BLHeli_S/Bluejay ESCs need this to enter their
+// bootloader; one that is talked to before it is ready does not answer.
+#define AP_RP2350_ESC_PASSTHROUGH_SETTLE_MS 1000
+#endif
+
 #if HAL_USE_PWM == TRUE
 
 #if defined(RP2350)
@@ -189,6 +201,17 @@ public:
      */
     void serial_reset(uint32_t chanmask) override;
 
+#elif defined(RP2350) && HAL_DSHOT_ENABLED && AP_RP2350_ESC_PASSTHROUGH_ENABLED
+    /*
+      ESC serial passthrough on the RP2350 PIO DShot outputs, for BLHeli
+      configuration and firmware flashing. See RCOutput_pico_serial.cpp.
+     */
+    bool serial_setup_output(uint8_t chan, uint32_t baudrate, uint32_t motor_mask) override;
+    bool serial_write_bytes(const uint8_t *bytes, uint16_t len) override;
+    uint16_t serial_read_bytes(uint8_t *buf, uint16_t len, uint32_t timeout_us) override;
+    void serial_end(uint32_t chanmask) override;
+    // passthrough counters, reported in @SYS/timers.txt
+    static void serial_passthrough_info(ExpandingString &str);
 #endif
 
     /*

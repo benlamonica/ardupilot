@@ -190,6 +190,7 @@ bool     RCOutput_pico::_initialised;
 bool     RCOutput_pico::_bidir;
 uint32_t RCOutput_pico::_chan_mask;
 uint8_t  RCOutput_pico::_gpio[RCOutput_pico::MAX_CHANNELS];
+uint32_t RCOutput_pico::_paused_mask;
 uint8_t  RCOutput_pico::_len_transition[4];
 uint8_t  RCOutput_pico::_stall_count[RCOutput_pico::MAX_CHANNELS];
 uint32_t RCOutput_pico::_stall_restarts[RCOutput_pico::MAX_CHANNELS];
@@ -410,6 +411,50 @@ void RCOutput_pico::write_frame(uint8_t chan, uint16_t frame)
 
     // mid transmit or mid receive; let it finish
     _stall_count[chan] = 0;
+}
+
+/*
+  ESC serial passthrough. Pausing takes the channel out of _chan_mask, which is
+  what makes write_frame() and read_telemetry() leave it alone, stops the state
+  machine, flushes its FIFOs so no stale frame goes out on resume, and drives the
+  pad high as GPIO - the idle state of the one-wire serial line. It is driven
+  rather than pulled up because an ESC input with a pull-down would otherwise
+  read low, and BLHeli_S/Bluejay only enter their bootloader after seeing the
+  line high for about 150 ms.
+  Resuming reruns the same setup as add_channel(), which hands the pad back to
+  the PIO.
+ */
+int8_t RCOutput_pico::pause_channel(uint8_t chan)
+{
+    if (!_initialised || chan >= MAX_CHANNELS || !(_chan_mask & (1U << chan))) {
+        return -1;
+    }
+    PIO_TypeDef *pio = DSHOT_PIO;
+    const uint8_t sm = chan;
+
+    _paused_mask |= (1U << chan);
+    _chan_mask &= ~(1U << chan);
+    rp2350_reg_clear_bits(&pio->CTRL, 1U << (PIO_CTRL_SM_ENABLE_LSB + sm));
+
+    // toggling the FIFO join flushes both halves; there is no direct flush
+    pio->SM[sm].SHIFTCTRL ^= PIO_SHIFTCTRL_FJOIN_RX;
+    pio->SM[sm].SHIFTCTRL ^= PIO_SHIFTCTRL_FJOIN_RX;
+
+    const ioline_t line = PAL_LINE(IOPORT1, _gpio[chan]);
+    palSetLine(line);
+    palSetLineMode(line, PAL_MODE_OUTPUT_PUSHPULL);
+    _stall_count[chan] = 0;
+    return (int8_t)_gpio[chan];
+}
+
+void RCOutput_pico::resume_channel(uint8_t chan)
+{
+    if (!_initialised || chan >= MAX_CHANNELS || !(_paused_mask & (1U << chan))) {
+        return;
+    }
+    start_sm(chan, _gpio[chan]);
+    _paused_mask &= ~(1U << chan);
+    _chan_mask |= (1U << chan);
 }
 
 /*
